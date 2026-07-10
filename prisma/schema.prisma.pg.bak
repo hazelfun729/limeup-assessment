@@ -1,0 +1,459 @@
+// Assessment V3 - Prisma Schema
+// Growth OS 自主学习力测评
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ==========================================
+// Enums
+// ==========================================
+
+enum AssessmentStatus {
+  IN_PROGRESS
+  COMPLETED
+  ABANDONED
+}
+
+enum PaymentStatus {
+  PENDING
+  CONFIRMED
+  FAILED
+  REFUNDED
+}
+
+enum PaymentMethod {
+  WECHAT_PAY
+  ALIPAY
+  STRIPE
+}
+
+enum ReportStatus {
+  ANALYZING
+  REVIEWING
+  SENDING
+  SENT
+  FAILED
+  NEEDS_MANUAL_REVIEW
+}
+
+enum EmailType {
+  VERIFICATION
+  HANDBOOK
+  PASSWORD_RESET
+}
+
+enum EmailStatus {
+  PENDING
+  SENT
+  FAILED
+}
+
+enum AdminRole {
+  SUPER_ADMIN
+  OPERATOR
+  REVIEWER
+  SUPPORT
+}
+
+enum PromptType {
+  REPORT_GENERATION
+  AI_CHECK
+  REPORT_REGENERATION
+}
+
+// ==========================================
+// 3-9-27 Model: System > Dimension > Module
+// ==========================================
+
+model System {
+  id        String   @id @default(cuid())
+  code      String   @unique
+  name      String
+  nameEn    String?
+  desc      String?
+  order     Int      @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  dimensions Dimension[]
+}
+
+model Dimension {
+  id        String   @id @default(cuid())
+  systemId  String
+  code      String   @unique
+  name      String
+  nameEn    String?
+  desc      String?
+  order     Int      @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  system  System   @relation(fields: [systemId], references: [id])
+  modules Module[]
+}
+
+model Module {
+  id          String   @id @default(cuid())
+  dimensionId String
+  code        String   @unique
+  name        String
+  nameEn      String?
+  desc        String?
+  order       Int      @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  dimension Dimension  @relation(fields: [dimensionId], references: [id])
+  questions Question[]
+}
+
+// ==========================================
+// Question Bank (version control)
+// ==========================================
+
+model QuestionVersion {
+  id          String   @id @default(cuid())
+  version     Int      @default(1)
+  isActive    Boolean  @default(true)
+  description String?
+  createdAt   DateTime @default(now())
+
+  questions   Question[]
+  assessments Assessment[]
+}
+
+model Question {
+  id              String   @id @default(cuid())
+  versionId       String
+  order           Int
+  stage           Int
+  content         String   @db.Text
+  isReverseScored Boolean  @default(false)
+  moduleId        String
+  scoreValues     Json     @default("{\"veryMatch\": 100, \"somewhatMatch\": 90, \"somewhatNotMatch\": 30, \"veryNotMatch\": 0}")
+  isActive        Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  version QuestionVersion @relation(fields: [versionId], references: [id])
+  module  Module          @relation(fields: [moduleId], references: [id])
+
+  answers AssessmentAnswer[]
+
+  @@index([versionId, order])
+  @@index([moduleId])
+}
+
+// ==========================================
+// Score Threshold
+// ==========================================
+
+model ScoreThreshold {
+  id        String   @id @default(cuid())
+  level     String
+  minValue  Int
+  maxValue  Int
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// ==========================================
+// User & Auth
+// ==========================================
+
+model User {
+  id               String    @id @default(cuid())
+  email            String    @unique
+  passwordHash     String?
+  phone            String?
+  emailVerified    Boolean   @default(false)
+  verificationCode String?
+  codeExpiresAt    DateTime?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  assessments    Assessment[]
+  growthProfiles GrowthProfile[]
+  handbooks      GrowthHandbook[]
+  payments       Payment[]
+  emails         Email[]
+  crmContact     CRMContact?
+
+  @@index([email])
+}
+
+// ==========================================
+// Assessment & Answers
+// ==========================================
+
+model Assessment {
+  id                String           @id @default(cuid())
+  userId            String?
+  questionVersionId String
+  status            AssessmentStatus @default(IN_PROGRESS)
+  currentQuestion   Int              @default(1)
+  answers           Json?
+  startedAt         DateTime         @default(now())
+  completedAt       DateTime?
+  source            String?
+  ip                String?
+  userAgent         String?
+  studentName       String?
+  parentName        String?
+  studentGender     String?
+  grade             String?
+  phone             String?
+  interests         String?          @db.Text
+  referrer          String?
+
+  user            User?              @relation(fields: [userId], references: [id])
+  questionVersion QuestionVersion    @relation(fields: [questionVersionId], references: [id])
+  answerRecords   AssessmentAnswer[]
+  growthProfile   GrowthProfile?
+  handbook        GrowthHandbook?
+  payment         Payment?
+
+  @@index([userId])
+  @@index([status])
+}
+
+model AssessmentAnswer {
+  id           String   @id @default(cuid())
+  assessmentId String
+  questionId   String
+  answer       String
+  score        Int?
+  answeredAt   DateTime @default(now())
+
+  assessment Assessment @relation(fields: [assessmentId], references: [id], onDelete: Cascade)
+  question   Question   @relation(fields: [questionId], references: [id])
+
+  @@unique([assessmentId, questionId])
+  @@index([assessmentId])
+}
+
+// ==========================================
+// Growth Profile (Free)
+// ==========================================
+
+model GrowthProfile {
+  id                String   @id @default(cuid())
+  userId            String
+  assessmentId      String   @unique
+  learningMode      String
+  learningModeName  String?
+  learningModeEmoji String?
+  systemScores      Json
+  dimensionScores   Json
+  moduleScores      Json
+  strengths         Json?
+  weaknesses        Json?
+  growthFocus       String?  @db.Text
+  growthFocusDetail String?  @db.Text
+  actionSuggestion  String?  @db.Text
+  summary           String?  @db.Text
+  createdAt         DateTime @default(now())
+
+  user       User       @relation(fields: [userId], references: [id])
+  assessment Assessment @relation(fields: [assessmentId], references: [id])
+
+  @@index([userId])
+}
+
+// ==========================================
+// Growth Handbook (Paid)
+// ==========================================
+
+model GrowthHandbook {
+  id            String       @id @default(cuid())
+  userId        String
+  assessmentId  String       @unique
+  status        ReportStatus @default(ANALYZING)
+  content       Json?
+  contentHtml   String?      @db.Text
+  aiRawOutput   String?      @db.Text
+  promptId      String?
+  promptVersion Int?
+  reviewedBy    String?
+  reviewedAt    DateTime?
+  reviewNotes   String?      @db.Text
+  sentAt        DateTime?
+  sentTo        String?
+  version       Int          @default(1)
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+
+  user       User       @relation(fields: [userId], references: [id])
+  assessment Assessment @relation(fields: [assessmentId], references: [id])
+  prompt     Prompt?    @relation(fields: [promptId], references: [id])
+
+  @@index([userId])
+  @@index([status])
+}
+
+// ==========================================
+// Payment
+// ==========================================
+
+model Payment {
+  id             String        @id @default(cuid())
+  userId         String
+  assessmentId   String        @unique
+  amount         Decimal       @db.Decimal(10, 2)
+  originalAmount Decimal?      @db.Decimal(10, 2)
+  method         PaymentMethod @default(WECHAT_PAY)
+  status         PaymentStatus @default(PENDING)
+  orderNo        String?       @unique
+  screenshot     String?
+  remark         String?
+  confirmedBy    String?
+  confirmedAt    DateTime?
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+
+  user       User       @relation(fields: [userId], references: [id])
+  assessment Assessment @relation(fields: [assessmentId], references: [id])
+
+  @@index([userId])
+  @@index([status])
+}
+
+// ==========================================
+// Prompt Management
+// ==========================================
+
+model Prompt {
+  id          String     @id @default(cuid())
+  name        String
+  type        PromptType
+  content     String     @db.Text
+  version     Int        @default(1)
+  isActive    Boolean    @default(true)
+  description String?
+  createdBy   String?
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+
+  handbooks GrowthHandbook[]
+
+  @@unique([name, version])
+  @@index([type, isActive])
+}
+
+// ==========================================
+// Email
+// ==========================================
+
+model Email {
+  id           String      @id @default(cuid())
+  userId       String
+  type         EmailType
+  to           String
+  subject      String
+  body         String?     @db.Text
+  status       EmailStatus @default(PENDING)
+  sentAt       DateTime?
+  failedReason String?     @db.Text
+  retryCount   Int         @default(0)
+  createdAt    DateTime    @default(now())
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@index([userId])
+  @@index([status])
+}
+
+// ==========================================
+// CRM
+// ==========================================
+
+model CRMContact {
+  id                      String    @id @default(cuid())
+  userId                  String    @unique
+  tags                    String[]
+  owner                   String?
+  source                  String?
+  intentionLevel          String?
+  learningPlanetIntention Boolean   @default(false)
+  coachIntention          Boolean   @default(false)
+  retestReminder          DateTime?
+  lastContactAt           DateTime?
+  wechatAdded             Boolean   @default(false)
+  notes                   String?   @db.Text
+  createdAt               DateTime  @default(now())
+  updatedAt               DateTime  @updatedAt
+
+  user      User          @relation(fields: [userId], references: [id])
+  followUps CRMFollowUp[]
+
+  @@index([owner])
+  @@index([intentionLevel])
+}
+
+model CRMFollowUp {
+  id        String   @id @default(cuid())
+  contactId String
+  content   String   @db.Text
+  createdBy String
+  createdAt DateTime @default(now())
+
+  contact CRMContact @relation(fields: [contactId], references: [id], onDelete: Cascade)
+
+  @@index([contactId])
+}
+
+// ==========================================
+// Admin
+// ==========================================
+
+model Admin {
+  id           String    @id @default(cuid())
+  username     String    @unique
+  email        String    @unique
+  passwordHash String
+  role         AdminRole @default(OPERATOR)
+  isActive     Boolean   @default(true)
+  lastLoginAt  DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  @@index([role])
+}
+
+// ==========================================
+// Operation Log
+// ==========================================
+
+model OperationLog {
+  id        String   @id @default(cuid())
+  adminId   String?
+  adminName String?
+  action    String
+  target    String?
+  details   String?  @db.Text
+  ip        String?
+  createdAt DateTime @default(now())
+
+  @@index([adminId])
+  @@index([action])
+  @@index([createdAt])
+}
+
+// ==========================================
+// Site Config
+// ==========================================
+
+model SiteConfig {
+  id        String   @id @default(cuid())
+  key       String   @unique
+  value     String   @db.Text
+  updatedAt DateTime @updatedAt
+}
