@@ -110,19 +110,23 @@ const SYSTEM_PROMPT = "你是一位资深教育咨询师，拥有10年以上青�
 async function main() {
   const prisma = await createPrismaClient();
 
-  // Check existing
-  const existing = await prisma.prompt.findFirst({
+  // Check latest existing version
+  const latest = await prisma.prompt.findFirst({
     where: { type: "REPORT_GENERATION", name: "成长导航手册生成" },
+    orderBy: { version: "desc" },
   });
 
-  if (existing) {
-    // Create new version
-    const newVersion = existing.version + 1;
+  if (latest && latest.content === REPORT_GENERATION_PROMPT && latest.isActive) {
+    console.log(`Prompt unchanged at v${latest.version}, skipping`);
+  } else {
+    const newVersion = latest ? latest.version + 1 : 1;
     // Deactivate old versions
-    await prisma.prompt.updateMany({
-      where: { type: "REPORT_GENERATION", name: "成长导航手册生成" },
-      data: { isActive: false },
-    });
+    if (latest) {
+      await prisma.prompt.updateMany({
+        where: { type: "REPORT_GENERATION", name: "成长导航手册生成" },
+        data: { isActive: false },
+      });
+    }
     const prompt = await prisma.prompt.create({
       data: {
         name: "成长导航手册生成",
@@ -133,24 +137,13 @@ async function main() {
         description: "根据66题测评数据自动生成完整的成长导航手册（HTML格式）",
       },
     });
-    console.log(`Prompt updated to v${newVersion}: ${prompt.id}`);
-  } else {
-    const prompt = await prisma.prompt.create({
-      data: {
-        name: "成长导航手册生成",
-        type: "REPORT_GENERATION",
-        content: REPORT_GENERATION_PROMPT,
-        version: 1,
-        isActive: true,
-        description: "根据66题测评数据自动生成完整的成长导航手册（HTML格式）",
-      },
-    });
-    console.log(`Prompt created: ${prompt.id}, v${prompt.version}`);
+    console.log(`Prompt ${latest ? "updated to" : "created at"} v${newVersion}: ${prompt.id}`);
   }
 
   // Also seed the system prompt as a separate entry
   const existingAI = await prisma.prompt.findFirst({
     where: { type: "AI_CHECK", name: "AI报告质量检查" },
+    orderBy: { version: "desc" },
   });
 
   if (!existingAI) {
@@ -165,6 +158,25 @@ async function main() {
       },
     });
     console.log("AI Check prompt created");
+  } else if (!existingAI.isActive || existingAI.content !== SYSTEM_PROMPT) {
+    const newVersion = existingAI.version + 1;
+    await prisma.prompt.updateMany({
+      where: { type: "AI_CHECK", name: "AI报告质量检查" },
+      data: { isActive: false },
+    });
+    await prisma.prompt.create({
+      data: {
+        name: "AI报告质量检查",
+        type: "AI_CHECK",
+        content: SYSTEM_PROMPT,
+        version: newVersion,
+        isActive: true,
+        description: "系统提示词，用于报告生成和AI辅助修改",
+      },
+    });
+    console.log(`AI Check prompt updated to v${newVersion}`);
+  } else {
+    console.log(`AI Check prompt unchanged at v${existingAI.version}, skipping`);
   }
 
   await prisma.$disconnect();
