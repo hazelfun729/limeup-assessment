@@ -1,49 +1,56 @@
-import { redirect } from "next/navigation";
-import { prisma } from "@/lib/prisma";
-import { headers } from "next/headers";
+"use client";
+
+import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 
 /**
  * Assessment entry point.
- * Creates a new assessment record in the database, then redirects to the question page.
+ * Calls POST /api/assessment to create a DB record, then redirects to the question page.
  */
-export default async function AssessmentStartPage() {
-  try {
-    const headersList = await headers();
+export default function AssessmentStartPage() {
+  const router = useRouter();
+  const [error, setError] = useState<string | null>(null);
 
-    const questionVersion = await prisma.questionVersion.findFirst({
-      where: { isActive: true },
-      orderBy: { version: "desc" },
-    });
-
-    if (!questionVersion) {
-      return (
-        <main className="flex min-h-dvh items-center justify-center">
-          <p className="text-red-500">题库未配置，请联系管理员</p>
-        </main>
-      );
+  useEffect(() => {
+    async function createAssessment() {
+      try {
+        const res = await fetch("/api/assessment", { method: "POST" });
+        if (!res.ok) {
+          const data = await res.json().catch(() => ({}));
+          throw new Error(data.error || "创建测评失败");
+        }
+        const { id } = await res.json();
+        router.replace(`/assessment/${id}`);
+      } catch (err) {
+        console.error("Failed to create assessment:", err);
+        setError(err instanceof Error ? err.message : "创建测评失败，请稍后重试");
+      }
     }
+    createAssessment();
+  }, [router]);
 
-    const assessment = await prisma.assessment.create({
-      data: {
-        questionVersionId: questionVersion.id,
-        status: "IN_PROGRESS",
-        currentQuestion: 1,
-        source: headersList.get("referer") || null,
-        ip:
-          headersList.get("x-forwarded-for") ||
-          headersList.get("x-real-ip") ||
-          null,
-        userAgent: headersList.get("user-agent") || null,
-      },
-    });
-
-    redirect(`/assessment/${assessment.id}`);
-  } catch (error) {
-    console.error("Failed to create assessment:", error);
+  if (error) {
     return (
       <main className="flex min-h-dvh items-center justify-center">
-        <p className="text-red-500">创建测评失败，请稍后重试</p>
+        <div className="text-center">
+          <p className="text-red-500">{error}</p>
+          <button
+            onClick={() => {
+              setError(null);
+              window.location.reload();
+            }}
+            className="mt-4 rounded-full bg-primary px-6 py-2 text-sm text-primary-foreground"
+          >
+            重试
+          </button>
+        </div>
       </main>
     );
   }
+
+  return (
+    <main className="flex min-h-dvh items-center justify-center">
+      <p className="text-muted-foreground">正在创建测评...</p>
+    </main>
+  );
 }
