@@ -25,7 +25,9 @@ type DimensionScoreEntry = { score: number; level: string; name: string };
 type ModuleScoreEntry = { score: number; level: string; name: string };
 
 type ReportDetail = {
-  handbook: {
+  status?: string;
+  paymentId?: string;
+  handbook?: {
     id: string;
     assessmentId: string;
     status: string;
@@ -267,6 +269,7 @@ export default function ReportReviewPage() {
   const [activeTab, setActiveTab] = useState<"report" | "answers">("report");
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [expandedDims, setExpandedDims] = useState(false);
+  const [confirmingPayment, setConfirmingPayment] = useState(false);
 
   const fetchReport = useCallback(async () => {
     try {
@@ -310,6 +313,25 @@ export default function ReportReviewPage() {
     setGenerating(false);
   };
 
+  const handleConfirmPayment = async () => {
+    if (!data?.paymentId) return;
+    setConfirmingPayment(true);
+    try {
+      const res = await fetch(`/api/admin/payments/${data.paymentId}/confirm`, {
+        method: "POST",
+      });
+      if (res.ok) {
+        await fetchReport();
+      } else {
+        const err = await res.json();
+        alert(err.error || "确认支付失败");
+      }
+    } catch {
+      alert("确认支付请求失败");
+    }
+    setConfirmingPayment(false);
+  };
+
   if (loading) {
     return (
       <div className="flex h-dvh items-center justify-center">
@@ -319,6 +341,73 @@ export default function ReportReviewPage() {
   }
 
   if (!data) {
+    return (
+      <div className="space-y-6 p-8">
+        <p className="text-destructive">报告不存在</p>
+        <Link href="/admin/reports">
+          <Button variant="outline" className="rounded-lg gap-2"><ArrowLeft className="h-4 w-4" />返回列表</Button>
+        </Link>
+      </div>
+    );
+  }
+
+  // AWAITING_PAYMENT state — no handbook yet, waiting for payment confirmation
+  if (data.status === "AWAITING_PAYMENT") {
+    const { user, assessment, answers } = data;
+    return (
+      <div className="flex h-dvh flex-col bg-[#fafafa]">
+        <header className="flex items-center justify-between border-b border-gray-200 bg-white px-4 py-2.5 shrink-0">
+          <div className="flex items-center gap-3">
+            <Link href="/admin/reports" className="text-gray-400 hover:text-gray-900">
+              <ArrowLeft className="h-5 w-5" />
+            </Link>
+            <div>
+              <h1 className="text-base font-semibold text-gray-900">支付待确认</h1>
+              <p className="text-xs text-gray-500">{user.email} · {assessment.studentName || "—"}</p>
+            </div>
+          </div>
+          <Button
+            size="sm"
+            onClick={handleConfirmPayment}
+            disabled={confirmingPayment}
+            className="gap-1 rounded-lg bg-[#6a9b1e] text-white hover:bg-[#5a8518]"
+          >
+            {confirmingPayment ? "确认中..." : "确认支付并生成报告"}
+          </Button>
+        </header>
+        <main className="flex-1 overflow-y-auto p-6">
+          <div className="mx-auto max-w-[820px]">
+            <div className="mb-6 rounded-2xl border-2 border-amber-300 bg-amber-50 p-6 text-center">
+              <p className="text-lg font-semibold text-amber-800">等待支付确认</p>
+              <p className="mt-1 text-sm text-amber-600">
+                用户已完成测评并提交了支付凭证，确认支付后将自动触发 AI 报告生成。
+              </p>
+            </div>
+            <h3 className="mb-3 text-sm font-semibold text-gray-500">原始答卷 ({answers.length} 题)</h3>
+            <div className="space-y-2">
+              {answers.map((a) => (
+                <div key={a.questionOrder} className="flex items-start gap-3 rounded-lg border border-gray-200 bg-white p-3 text-sm">
+                  <span className="shrink-0 rounded bg-gray-100 px-2 py-0.5 text-xs font-medium tabular-nums">{a.questionOrder}</span>
+                  <div className="flex-1">
+                    <p className="text-gray-900">{a.questionContent}</p>
+                    <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-gray-500">
+                      <span>{a.system}</span><span>›</span><span>{a.dimension}</span><span>›</span><span>{a.module}</span>
+                    </div>
+                  </div>
+                  <div className="shrink-0 text-right">
+                    <p className="font-medium text-gray-900">{ANSWER_LABELS[a.answer] || a.answer}</p>
+                    <p className="text-xs tabular-nums text-gray-500">{a.score !== null ? `${a.score}分` : "—"}</p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </main>
+      </div>
+    );
+  }
+
+  if (!data.handbook) {
     return (
       <div className="space-y-6 p-8">
         <p className="text-destructive">报告不存在</p>

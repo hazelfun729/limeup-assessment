@@ -116,8 +116,8 @@ async function main() {
       data: {
         userId: user.id,
         assessmentId: record.id,
-        amount: "9.9",
-        originalAmount: "99",
+        amount: "9.9" as unknown as number,
+        originalAmount: "99" as unknown as number,
         method: "WECHAT_PAY",
         status: "PENDING",
         orderNo: `HIST-${record.id}`,

@@ -18,7 +18,8 @@ export async function GET(
 
     const { id } = await params;
 
-    const handbook = await prisma.growthHandbook.findUnique({
+    // Try lookup by handbook.id first, then by assessmentId
+    let handbook = await prisma.growthHandbook.findUnique({
       where: { id },
       include: {
         user: { select: { email: true, phone: true } },
@@ -39,7 +40,100 @@ export async function GET(
       },
     });
 
+    // If not found by handbook id, try by assessmentId
     if (!handbook) {
+      handbook = await prisma.growthHandbook.findUnique({
+        where: { assessmentId: id },
+        include: {
+          user: { select: { email: true, phone: true } },
+          assessment: {
+            include: {
+              answerRecords: {
+                include: {
+                  question: {
+                    include: { module: { include: { dimension: { include: { system: true } } } } },
+                  },
+                },
+                orderBy: { answeredAt: "asc" },
+              },
+              growthProfile: true,
+              payment: true,
+            },
+          },
+        },
+      });
+    }
+
+    // If still no handbook, check for PENDING payment (AWAITING_PAYMENT state)
+    if (!handbook) {
+      const assessment = await prisma.assessment.findUnique({
+        where: { id },
+        include: {
+          user: { select: { email: true, phone: true } },
+          answerRecords: {
+            include: {
+              question: {
+                include: { module: { include: { dimension: { include: { system: true } } } } },
+              },
+            },
+            orderBy: { answeredAt: "asc" },
+          },
+          growthProfile: true,
+          payment: true,
+        },
+      });
+
+      if (assessment && assessment.payment && assessment.payment.status === "PENDING") {
+        return NextResponse.json({
+          status: "AWAITING_PAYMENT",
+          paymentId: assessment.payment.id,
+          user: {
+            email: assessment.user?.email || "",
+            phone: assessment.user?.phone || null,
+          },
+          assessment: {
+            studentName: assessment.studentName,
+            parentName: assessment.parentName,
+            grade: assessment.grade,
+            studentGender: assessment.studentGender,
+            interests: assessment.interests,
+            status: assessment.status,
+          },
+          profile: assessment.growthProfile
+            ? {
+                learningMode: assessment.growthProfile.learningMode,
+                learningModeName: assessment.growthProfile.learningModeName,
+                learningModeEmoji: assessment.growthProfile.learningModeEmoji,
+                systemScores: assessment.growthProfile.systemScores,
+                dimensionScores: assessment.growthProfile.dimensionScores,
+                moduleScores: assessment.growthProfile.moduleScores,
+                strengths: assessment.growthProfile.strengths,
+                weaknesses: assessment.growthProfile.weaknesses,
+                growthFocus: assessment.growthProfile.growthFocus,
+                growthFocusDetail: assessment.growthProfile.growthFocusDetail,
+                actionSuggestion: assessment.growthProfile.actionSuggestion,
+              }
+            : null,
+          answers: assessment.answerRecords.map((a) => ({
+            questionId: a.questionId,
+            questionOrder: a.question.order,
+            questionContent: a.question.content,
+            stage: a.question.stage,
+            answer: a.answer,
+            score: a.score,
+            isReverseScored: a.question.isReverseScored,
+            module: a.question.module.name,
+            dimension: a.question.module.dimension.name,
+            system: a.question.module.dimension.system.name,
+          })),
+          payment: {
+            status: assessment.payment.status,
+            amount: assessment.payment.amount,
+            confirmedAt: assessment.payment.confirmedAt,
+          },
+        });
+      }
+
       return NextResponse.json({ error: "报告不存在" }, { status: 404 });
     }
 
