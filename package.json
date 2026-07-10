@@ -8,7 +8,7 @@
     "start": "next start",
     "lint": "eslint",
     "db:deploy": "cp prisma/schema.prisma.pg.bak prisma/schema.prisma && npx prisma generate && npx prisma migrate deploy",
-    "db:seed": "npx tsx prisma/seed/seed-questions.ts && npx tsx prisma/seed/seed-admin.ts && npx tsx prisma/seed/seed-prompt.ts",
+    "db:seed": "npx tsx prisma/seed/seed-questions.ts && npx tsx prisma/seed/seed-admin.ts && npx tsx prisma/seed/seed-prompt.ts && npx tsx prisma/seed/seed-historical.ts",
     "vercel-build": "npm run db:deploy && npm run db:seed && next build"
   },
   "dependencies": {
