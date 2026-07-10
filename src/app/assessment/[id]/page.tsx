@@ -177,8 +177,15 @@ export default function AssessmentQuestionPage() {
     if (completedStage < 3) {
       setCurrentQ(STAGES[completedStage].questionRange[0]);
     } else {
-      // All done — flush and redirect to registration
-      flushAndNavigate(`/register?assessmentId=${assessmentId}`);
+      // All done — redirect immediately, save answers in background
+      // Save to localStorage immediately (already done by useEffect)
+      // Fire-and-forget API save
+      fetch(`/api/assessment/${assessmentId}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ answers, currentQuestion: currentQ }),
+      }).catch(() => {});
+      router.push(`/register?assessmentId=${assessmentId}`);
     }
   };
 

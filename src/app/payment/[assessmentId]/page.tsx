@@ -107,6 +107,21 @@ export default function PaymentPage() {
           </div>
         </motion.section>
 
+        {/* Payment remark warning */}
+        <motion.div
+          initial={{ opacity: 0, y: 8 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.35 }}
+          className="rounded-xl border-2 border-amber-400 bg-amber-50 px-5 py-4 text-center"
+        >
+          <p className="text-sm font-semibold text-amber-800">
+            ⚠️ 请务必在付款备注中填写您的邮箱
+          </p>
+          <p className="mt-1 text-xs text-amber-600">
+            否则无法自动匹配，需要联系客服人工处理（可能延迟）
+          </p>
+        </motion.div>
+
         {/* Post-payment instruction */}
         <motion.p
           initial={{ opacity: 0 }}

@@ -3,7 +3,7 @@
 import { useEffect, useState, useCallback, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 import Link from "next/link";
-import { RefreshCw, Check, FileText, CreditCard, Mail } from "lucide-react";
+import { RefreshCw, Check, FileText, Mail } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
 /* ── Report types ── */
@@ -15,12 +15,14 @@ type Report = {
   learningMode: string | null;
   growthFocus: string | null;
   status: string;
+  paymentId: string | null;
   createdAt: string;
   sentAt: string | null;
 };
 
 const REPORT_STATUS_FILTERS = [
   { value: "", label: "全部" },
+  { value: "AWAITING_PAYMENT", label: "支付待确认" },
   { value: "ANALYZING", label: "分析中" },
   { value: "REVIEWING", label: "待审核" },
   { value: "SENDING", label: "发送中" },
@@ -29,6 +31,7 @@ const REPORT_STATUS_FILTERS = [
 ];
 
 const STATUS_LABELS: Record<string, { label: string; cls: string }> = {
+  AWAITING_PAYMENT: { label: "支付待确认", cls: "bg-orange-100 text-orange-700" },
   ANALYZING: { label: "分析中", cls: "bg-blue-100 text-blue-700" },
   REVIEWING: { label: "待审核", cls: "bg-amber-100 text-amber-700" },
   NEEDS_MANUAL_REVIEW: { label: "需人工处理", cls: "bg-red-100 text-red-700" },
@@ -36,25 +39,6 @@ const STATUS_LABELS: Record<string, { label: string; cls: string }> = {
   SENT: { label: "已发送", cls: "bg-emerald-100 text-emerald-700" },
   FAILED: { label: "失败", cls: "bg-red-100 text-red-700" },
 };
-
-/* ── Payment types ── */
-type Payment = {
-  id: string;
-  userEmail: string;
-  amount: number;
-  status: string;
-  orderNo: string | null;
-  screenshot: string | null;
-  confirmedAt: string | null;
-  createdAt: string;
-};
-
-const PAYMENT_STATUS_FILTERS = [
-  { value: "", label: "全部" },
-  { value: "PENDING", label: "待确认" },
-  { value: "CONFIRMED", label: "已确认" },
-  { value: "FAILED", label: "失败" },
-];
 
 /* ── Email types ── */
 type EmailRecord = {
@@ -84,7 +68,6 @@ const EMAIL_STATUS_FILTERS = [
 /* ── Tab definitions ── */
 const TABS = [
   { key: "reports", label: "报告管理", icon: FileText },
-  { key: "payments", label: "支付确认", icon: CreditCard },
   { key: "emails", label: "邮件记录", icon: Mail },
 ] as const;
 
@@ -103,6 +86,7 @@ function ReportsTab() {
   const [loading, setLoading] = useState(true);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [batchSending, setBatchSending] = useState(false);
+  const [confirmingPayment, setConfirmingPayment] = useState<string | null>(null);
 
   const fetchReports = useCallback(async () => {
     setLoading(true);
@@ -182,6 +166,25 @@ function ReportsTab() {
       alert("网络错误");
     }
     setBatchSending(false);
+  };
+
+  const handleConfirmPayment = async (paymentId: string) => {
+    if (!confirm("确认该笔支付？确认后将自动生成报告。")) return;
+    setConfirmingPayment(paymentId);
+    try {
+      const res = await fetch(`/api/admin/payments/${paymentId}/confirm`, { method: "POST" });
+      if (res.ok) {
+        const data = await res.json();
+        alert(`支付已确认，报告状态: ${data.reportStatus === "REVIEWING" ? "待审核" : "分析中"}`);
+        await fetchReports();
+      } else {
+        const err = await res.json();
+        alert(err.error || "确认失败");
+      }
+    } catch {
+      alert("网络错误");
+    }
+    setConfirmingPayment(null);
   };
 
   return (
@@ -274,9 +277,23 @@ function ReportsTab() {
                     </td>
                     <td className="px-4 py-3 text-muted-foreground">{new Date(r.createdAt).toLocaleString("zh-CN")}</td>
                     <td className="px-4 py-3">
-                      <Link href={`/admin/reports/${r.id}`} className="text-sm font-medium text-primary hover:underline">
-                        管理 →
-                      </Link>
+                      {r.status === "AWAITING_PAYMENT" ? (
+                        <button
+                          onClick={() => r.paymentId && handleConfirmPayment(r.paymentId)}
+                          disabled={confirmingPayment === r.paymentId}
+                          className="inline-flex items-center gap-1 rounded-lg bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground hover:brightness-95 disabled:opacity-50"
+                        >
+                          {confirmingPayment === r.paymentId ? (
+                            <><RefreshCw className="h-3 w-3 animate-spin" />确认中...</>
+                          ) : (
+                            <><Check className="h-3 w-3" />确认支付</>
+                          )}
+                        </button>
+                      ) : (
+                        <Link href={`/admin/reports/${r.id}`} className="text-sm font-medium text-primary hover:underline">
+                          管理 →
+                        </Link>
+                      )}
                     </td>
                   </tr>
                 );
@@ -293,147 +310,6 @@ function ReportsTab() {
           </p>
         )}
       </div>
-    </div>
-  );
-}
-
-/* ════════════════════════════════════════════
-   Payments Tab
-   ════════════════════════════════════════════ */
-function PaymentsTab() {
-  const [payments, setPayments] = useState<Payment[]>([]);
-  const [total, setTotal] = useState(0);
-  const [statusFilter, setStatusFilter] = useState("");
-  const [loading, setLoading] = useState(true);
-  const [confirming, setConfirming] = useState<string | null>(null);
-
-  const fetchPayments = useCallback(async () => {
-    setLoading(true);
-    try {
-      const params = new URLSearchParams({ pageSize: "50", status: statusFilter });
-      const res = await fetch(`/api/admin/payments?${params}`);
-      if (res.ok) {
-        const data = await res.json();
-        setPayments(data.payments);
-        setTotal(data.total);
-      }
-    } catch {}
-    setLoading(false);
-  }, [statusFilter]);
-
-  useEffect(() => { fetchPayments(); }, [fetchPayments]);
-
-  const handleConfirm = async (paymentId: string) => {
-    if (!confirm("确认该笔支付？确认后将开始生成报告。")) return;
-    setConfirming(paymentId);
-    try {
-      const res = await fetch(`/api/admin/payments/${paymentId}/confirm`, { method: "POST" });
-      if (res.ok) {
-        await fetchPayments();
-      } else {
-        const data = await res.json();
-        alert(data.error || "确认失败");
-      }
-    } catch {
-      alert("网络错误");
-    }
-    setConfirming(null);
-  };
-
-  const handleBatchConfirm = async () => {
-    const pendingIds = payments.filter((p) => p.status === "PENDING").map((p) => p.id);
-    if (pendingIds.length === 0) return;
-    if (!confirm(`批量确认 ${pendingIds.length} 笔待确认支付？`)) return;
-    for (const id of pendingIds) {
-      try {
-        await fetch(`/api/admin/payments/${id}/confirm`, { method: "POST" });
-      } catch {}
-    }
-    await fetchPayments();
-  };
-
-  return (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <div className="flex gap-1">
-          {PAYMENT_STATUS_FILTERS.map((f) => (
-            <button
-              key={f.value}
-              onClick={() => setStatusFilter(f.value)}
-              className={`rounded-lg px-3 py-2 text-sm transition-colors ${
-                statusFilter === f.value
-                  ? "bg-primary/10 font-medium text-foreground"
-                  : "text-muted-foreground hover:bg-secondary"
-              }`}
-            >
-              {f.label}
-            </button>
-          ))}
-        </div>
-        {statusFilter === "PENDING" && payments.some((p) => p.status === "PENDING") && (
-          <Button size="sm" onClick={handleBatchConfirm} className="rounded-lg bg-primary text-primary-foreground hover:brightness-95">
-            批量确认全部
-          </Button>
-        )}
-      </div>
-
-      <div className="overflow-x-auto rounded-xl border border-border">
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="border-b border-border bg-secondary/50">
-              <th className="px-4 py-3 text-left font-medium text-muted-foreground">邮箱</th>
-              <th className="px-4 py-3 text-left font-medium text-muted-foreground">金额</th>
-              <th className="px-4 py-3 text-left font-medium text-muted-foreground">订单号</th>
-              <th className="px-4 py-3 text-left font-medium text-muted-foreground">时间</th>
-              <th className="px-4 py-3 text-left font-medium text-muted-foreground">状态</th>
-              <th className="px-4 py-3 text-left font-medium text-muted-foreground">操作</th>
-            </tr>
-          </thead>
-          <tbody>
-            {loading ? (
-              <tr><td colSpan={6} className="px-4 py-12 text-center text-muted-foreground">加载中...</td></tr>
-            ) : payments.length === 0 ? (
-              <tr><td colSpan={6} className="px-4 py-12 text-center text-muted-foreground">暂无记录</td></tr>
-            ) : (
-              payments.map((p) => (
-                <tr key={p.id} className="border-b border-border hover:bg-secondary/30">
-                  <td className="px-4 py-3 font-medium">{p.userEmail}</td>
-                  <td className="px-4 py-3 tabular-nums">¥{Number(p.amount).toFixed(2)}</td>
-                  <td className="px-4 py-3 text-muted-foreground">{p.orderNo || "—"}</td>
-                  <td className="px-4 py-3 text-muted-foreground">{new Date(p.createdAt).toLocaleString("zh-CN")}</td>
-                  <td className="px-4 py-3">
-                    <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${
-                      p.status === "CONFIRMED" ? "bg-emerald-100 text-emerald-700"
-                        : p.status === "PENDING" ? "bg-amber-100 text-amber-700"
-                          : "bg-red-100 text-red-700"
-                    }`}>
-                      {p.status === "CONFIRMED" ? "已确认" : p.status === "PENDING" ? "待确认" : p.status}
-                    </span>
-                  </td>
-                  <td className="px-4 py-3">
-                    {p.status === "PENDING" ? (
-                      <Button
-                        size="sm"
-                        onClick={() => handleConfirm(p.id)}
-                        disabled={confirming === p.id}
-                        className="h-8 rounded-lg bg-primary text-xs text-primary-foreground hover:brightness-95"
-                      >
-                        {confirming === p.id ? <RefreshCw className="h-3 w-3 animate-spin" /> : <Check className="h-3 w-3" />}
-                        <span className="ml-1">确认</span>
-                      </Button>
-                    ) : (
-                      <span className="text-xs text-muted-foreground">
-                        {p.confirmedAt ? new Date(p.confirmedAt).toLocaleString("zh-CN") : "—"}
-                      </span>
-                    )}
-                  </td>
-                </tr>
-              ))
-            )}
-          </tbody>
-        </table>
-      </div>
-      <p className="text-xs text-muted-foreground">共 {total} 条记录</p>
     </div>
   );
 }
@@ -541,7 +417,7 @@ function ReportManagementPage() {
         <div>
           <h1 className="text-2xl font-semibold text-foreground">报告管理</h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            报告审核、支付确认、邮件记录
+            支付确认、报告审核、邮件发送
           </p>
         </div>
       </div>
@@ -569,7 +445,6 @@ function ReportManagementPage() {
 
       {/* Tab content */}
       {activeTab === "reports" && <ReportsTab />}
-      {activeTab === "payments" && <PaymentsTab />}
       {activeTab === "emails" && <EmailsTab />}
     </div>
   );
