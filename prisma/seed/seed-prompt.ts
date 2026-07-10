@@ -2,17 +2,7 @@
  * Seed script: Report Generation Prompt Template
  * Usage: npx tsx prisma/seed/seed-prompt.ts
  */
-import { PrismaClient } from "../../src/generated/prisma/client";
-import { PrismaBetterSqlite3 } from "@prisma/adapter-better-sqlite3";
-import path from "path";
-
-function createPrismaClient() {
-  const dbPath = path.resolve(process.cwd(), "prisma/dev.db");
-  const adapter = new PrismaBetterSqlite3({ url: `file:${dbPath}` });
-  return new PrismaClient({ adapter });
-}
-
-const prisma = createPrismaClient();
+import { createPrismaClient } from "./prisma-helper";
 
 const REPORT_GENERATION_PROMPT = `请根据以下孩子的自主学习力测评数据，撰写一份完整的「成长导航手册」。
 
@@ -118,6 +108,8 @@ const REPORT_GENERATION_PROMPT = `请根据以下孩子的自主学习力测评�
 const SYSTEM_PROMPT = "你是一位资深教育咨询师，拥有10年以上青少年学习力诊断与成长规划经验。你擅长将专业的测评数据转化为家长能理解、能执行的具体建议。你的文字温暖、专业、有深度。";
 
 async function main() {
+  const prisma = await createPrismaClient();
+
   // Check existing
   const existing = await prisma.prompt.findFirst({
     where: { type: "REPORT_GENERATION", name: "成长导航手册生成" },
@@ -174,13 +166,12 @@ async function main() {
     });
     console.log("AI Check prompt created");
   }
+
+  await prisma.$disconnect();
 }
 
 main()
   .catch((e) => {
     console.error("Seed failed:", e);
     process.exit(1);
-  })
-  .finally(async () => {
-    await prisma.$disconnect();
   });

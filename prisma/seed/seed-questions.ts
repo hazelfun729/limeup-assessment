@@ -7,14 +7,7 @@
  * Parsed hierarchy and question data hardcoded from XLSX extraction.
  */
 
-import "dotenv/config";
-import { PrismaClient } from "../../src/generated/prisma/client";
-import { PrismaBetterSqlite3 } from "@prisma/adapter-better-sqlite3";
-import path from "path";
-
-const dbPath = path.resolve(process.cwd(), "prisma/dev.db");
-const adapter = new PrismaBetterSqlite3({ url: `file:${dbPath}` });
-const prisma = new PrismaClient({ adapter });
+import { createPrismaClient } from "./prisma-helper";
 
 // ==========================================
 // 3-9-27 Hierarchy Definition
@@ -177,6 +170,7 @@ const QUESTIONS: Array<{
 // ==========================================
 
 async function seed() {
+  const prisma = await createPrismaClient();
   console.log("🌱 Seeding 3-9-27 hierarchy + 66 questions...\n");
 
   // 1. Create Systems
@@ -291,13 +285,11 @@ async function seed() {
   console.log(`  ✅ Score thresholds: 强(66-100), 中(40-65), 弱(0-39)`);
 
   console.log("\n🎉 Seed complete!");
+  await prisma.$disconnect();
 }
 
 seed()
   .catch((e) => {
     console.error("Seed failed:", e);
     process.exit(1);
-  })
-  .finally(async () => {
-    await prisma.$disconnect();
   });

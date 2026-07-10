@@ -7,20 +7,12 @@
  *   Password: admin123
  */
 
-import { PrismaClient } from "../../src/generated/prisma/client";
-import { PrismaBetterSqlite3 } from "@prisma/adapter-better-sqlite3";
-import path from "path";
+import { createPrismaClient } from "./prisma-helper";
 import bcrypt from "bcryptjs";
 
-function createPrismaClient() {
-  const dbPath = path.resolve(process.cwd(), "prisma/dev.db");
-  const adapter = new PrismaBetterSqlite3({ url: `file:${dbPath}` });
-  return new PrismaClient({ adapter });
-}
-
-const prisma = createPrismaClient();
-
 async function main() {
+  const prisma = await createPrismaClient();
+
   const username = process.env.ADMIN_USERNAME || "admin";
   const password = process.env.ADMIN_PASSWORD || "admin123";
   const email = process.env.ADMIN_EMAIL || "admin@limeup.com";
@@ -45,13 +37,11 @@ async function main() {
   });
 
   console.log(`Admin account ready: ${admin.username} (${admin.email}), role=${admin.role}`);
+  await prisma.$disconnect();
 }
 
 main()
   .catch((e) => {
     console.error("Seed failed:", e);
     process.exit(1);
-  })
-  .finally(async () => {
-    await prisma.$disconnect();
   });
