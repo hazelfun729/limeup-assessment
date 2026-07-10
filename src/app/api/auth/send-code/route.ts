@@ -128,6 +128,10 @@ export async function POST(request: NextRequest) {
             failedReason: message,
           },
         });
+        return NextResponse.json(
+          { error: "验证码邮件发送失败，请稍后重试或联系客服" },
+          { status: 500 }
+        );
       }
     } else if (resend) {
       // Priority 2: Resend
@@ -149,6 +153,10 @@ export async function POST(request: NextRequest) {
             failedReason: sendError.message,
           },
         });
+        return NextResponse.json(
+          { error: "验证码邮件发送失败，请稍后重试或联系客服" },
+          { status: 500 }
+        );
       } else {
         await prisma.email.create({
           data: {
