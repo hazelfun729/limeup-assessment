@@ -47,7 +47,7 @@ export const prisma = new Proxy({} as PrismaClient, {
           getClientPromise().then(
             (client) =>
               (
-                (client as Record<string, Record<string, (...a: unknown[]) => unknown>>)[
+                (client as unknown as Record<string, Record<string, (...a: unknown[]) => unknown>>)[
                   prop as string
                 ][method as string]
               )(...args)
