@@ -75,8 +75,8 @@ export async function POST(
       create: {
         userId: assessment.userId,
         assessmentId,
-        amount: 9.9,
-        originalAmount: 99,
+        amount: "9.9",
+        originalAmount: "99",
         method: "WECHAT_PAY",
         status: "PENDING",
         screenshot: screenshot || null,

@@ -71,7 +71,6 @@ async function main() {
         data: {
           email: record.userEmail,
           emailVerified: true,
-          name: record.studentName || null,
         },
       });
     }
@@ -117,8 +116,8 @@ async function main() {
       data: {
         userId: user.id,
         assessmentId: record.id,
-        amount: 9.9,
-        originalAmount: 99,
+        amount: "9.9",
+        originalAmount: "99",
         method: "WECHAT_PAY",
         status: "PENDING",
         orderNo: `HIST-${record.id}`,
