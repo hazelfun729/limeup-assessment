@@ -1,8 +1,9 @@
 "use client";
 
-import { useParams } from "next/navigation";
+import { useState } from "react";
+import { useParams, useRouter } from "next/navigation";
 import { motion } from "framer-motion";
-import { Check, BookOpen, MessageCircle } from "lucide-react";
+import { Check, BookOpen, MessageCircle, RefreshCw } from "lucide-react";
 
 const HANDBOOK_SECTIONS = [
   "全景学习画像与学习模式分析",
@@ -16,7 +17,30 @@ const HANDBOOK_SECTIONS = [
 
 export default function PaymentPage() {
   const params = useParams();
+  const router = useRouter();
   const assessmentId = params.assessmentId as string;
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const handlePaid = async () => {
+    setSubmitting(true);
+    setError(null);
+    try {
+      const res = await fetch(`/api/payment/${assessmentId}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error || "提交失败");
+      }
+      router.push(`/status/${assessmentId}`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "提交失败，请重试");
+      setSubmitting(false);
+    }
+  };
 
   return (
     <main className="min-h-dvh bg-background px-6 py-12">
@@ -139,12 +163,20 @@ export default function PaymentPage() {
           transition={{ delay: 0.5 }}
           className="text-center"
         >
-          <a
-            href={`/status/${assessmentId}`}
-            className="inline-flex h-12 items-center justify-center rounded-full bg-primary px-8 text-base font-medium text-primary-foreground shadow-sm transition-all hover:shadow-md hover:brightness-95 active:scale-[0.98]"
+          {error && (
+            <p className="mb-3 text-sm text-red-500">{error}</p>
+          )}
+          <button
+            onClick={handlePaid}
+            disabled={submitting}
+            className="inline-flex h-12 items-center justify-center gap-2 rounded-full bg-primary px-8 text-base font-medium text-primary-foreground shadow-sm transition-all hover:shadow-md hover:brightness-95 active:scale-[0.98] disabled:opacity-50"
           >
-            我已支付，查看进度
-          </a>
+            {submitting ? (
+              <><RefreshCw className="h-4 w-4 animate-spin" />提交中...</>
+            ) : (
+              "我已支付，查看进度"
+            )}
+          </button>
         </motion.div>
       </div>
     </main>
