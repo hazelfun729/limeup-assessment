@@ -100,6 +100,25 @@ const SYSTEM_ORDER = ["motivation", "ability", "perseverance"] as const;
 // Helpers
 // ==========================================
 
+function sanitizeHtml(raw: string): string {
+  let html = raw.trim();
+  // Case 1: marked converted ```html...``` into <pre><code class="language-html">...escaped...</code></pre>
+  const preMatch = html.match(/<pre><code[^>]*>([\s\S]*?)<\/code><\/pre>/i);
+  if (preMatch) {
+    html = preMatch[1]
+      .replace(/&lt;/g, "<")
+      .replace(/&gt;/g, ">")
+      .replace(/&amp;/g, "&")
+      .replace(/&quot;/g, '"');
+  }
+  // Case 2: Raw code fences in the HTML string
+  const fenceMatch = html.match(/^```(?:html|HTML)?\s*\n([\s\S]*?)\n```\s*$/);
+  if (fenceMatch) {
+    html = fenceMatch[1].trim();
+  }
+  return html;
+}
+
 function parseReportSections(html: string): ParsedSection[] {
   const sections: ParsedSection[] = [];
   const headingRegex = /<(h[1-3])[^>]*>(.*?)<\/\1>/gi;
@@ -420,7 +439,7 @@ export default function ReportReviewPage() {
 
   const { handbook, user, assessment, answers, payment } = data;
   const profile = data.profile;
-  const html = handbook.contentHtml || "";
+  const html = sanitizeHtml(handbook.contentHtml || "");
   const sections = html ? parseReportSections(html) : [];
 
   const sysScores = profile?.systemScores ?? null;

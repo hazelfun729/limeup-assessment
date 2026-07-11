@@ -11,6 +11,20 @@ const AI_API_KEY = process.env.AI_API_KEY || "";
 const AI_MODEL = process.env.AI_MODEL || "deepseek-chat";
 
 /**
+ * Strip code fences that LLMs sometimes wrap around their HTML output.
+ * e.g. ```html\n<h2>...</h2>\n``` → <h2>...</h2>
+ */
+function stripCodeFences(text: string): string {
+  let result = text.trim();
+  // Remove ```html ... ``` or ``` ... ``` wrappers
+  const fenceMatch = result.match(/^```(?:html|HTML|Html)?\s*\n([\s\S]*?)\n```\s*$/);
+  if (fenceMatch) {
+    result = fenceMatch[1].trim();
+  }
+  return result;
+}
+
+/**
  * Convert markdown text to HTML
  */
 function markdownToHtml(md: string): string {
@@ -244,8 +258,9 @@ export async function generateHandbook(assessmentId: string): Promise<{
   // 4. Call AI
   const aiOutput = await callAI(systemPrompt, userPrompt);
 
-  // 5. Convert markdown to HTML (AI outputs markdown by default)
-  const htmlContent = markdownToHtml(aiOutput);
+  // 5. Strip code fences (LLMs sometimes wrap HTML in ```html ... ```) then convert markdown to HTML
+  const cleanedOutput = stripCodeFences(aiOutput);
+  const htmlContent = markdownToHtml(cleanedOutput);
 
   // 6. Save to handbook
   const existingHandbook = await prisma.growthHandbook.findUnique({

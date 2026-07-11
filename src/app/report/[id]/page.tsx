@@ -111,6 +111,23 @@ const MODULE_DIM_MAP: Record<string, string> = {
 // Helper Functions
 // ==========================================
 
+function sanitizeHtml(raw: string): string {
+  let html = raw.trim();
+  const preMatch = html.match(/<pre><code[^>]*>([\s\S]*?)<\/code><\/pre>/i);
+  if (preMatch) {
+    html = preMatch[1]
+      .replace(/&lt;/g, "<")
+      .replace(/&gt;/g, ">")
+      .replace(/&amp;/g, "&")
+      .replace(/&quot;/g, '"');
+  }
+  const fenceMatch = html.match(/^```(?:html|HTML)?\s*\n([\s\S]*?)\n```\s*$/);
+  if (fenceMatch) {
+    html = fenceMatch[1].trim();
+  }
+  return html;
+}
+
 function parseReportSections(html: string): ParsedSection[] {
   const sections: ParsedSection[] = [];
   const headingRegex = /<(h[1-3])[^>]*>(.*?)<\/\1>/gi;
@@ -755,7 +772,7 @@ export default function ReportPage() {
   }
 
   const { handbook, assessment, profile } = data;
-  const html = handbook.contentHtml || handbook.aiRawOutput || "";
+  const html = sanitizeHtml(handbook.contentHtml || handbook.aiRawOutput || "");
   const sections = parseReportSections(html).filter(
     (s) => !shouldSkipSection(s.title)
   );

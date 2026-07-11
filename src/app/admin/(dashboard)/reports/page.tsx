@@ -3,7 +3,7 @@
 import { useEffect, useState, useCallback, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 import Link from "next/link";
-import { RefreshCw, Check, FileText, Mail } from "lucide-react";
+import { RefreshCw, Check, FileText, Mail, Sparkles, CheckCircle, Download } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
 /* ── Report types ── */
@@ -84,8 +84,9 @@ function ReportsTab() {
   const [total, setTotal] = useState(0);
   const [statusFilter, setStatusFilter] = useState(initialStatus);
   const [loading, setLoading] = useState(true);
-  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
-  const [batchSending, setBatchSending] = useState(false);
+  const [selectedItems, setSelectedItems] = useState<Map<string, { status: string; actionId: string }>>(new Map());
+  const [batchWorking, setBatchWorking] = useState(false);
+  const [downloading, setDownloading] = useState(false);
   const [confirmingPayment, setConfirmingPayment] = useState<string | null>(null);
 
   const fetchReports = useCallback(async () => {
@@ -97,77 +98,50 @@ function ReportsTab() {
         const data = await res.json();
         setReports(data.reports);
         setTotal(data.total);
-        // Clear selections that are no longer SENDING
-        setSelectedIds((prev) => {
-          const next = new Set<string>();
-          for (const id of prev) {
-            const r = data.reports.find((r: Report) => r.id === id);
-            if (r && r.status === "SENDING") next.add(id);
-          }
-          return next;
-        });
       }
     } catch {}
     setLoading(false);
+    setSelectedItems(new Map());
   }, [statusFilter]);
 
   useEffect(() => { fetchReports(); }, [fetchReports]);
 
-  const sendingReports = reports.filter((r) => r.status === "SENDING");
-  const allSendingSelected = sendingReports.length > 0 && sendingReports.every((r) => selectedIds.has(r.id));
+  const ACTIONABLE = new Set(["AWAITING_PAYMENT", "ANALYZING", "REVIEWING", "SENDING"]);
+  const actionableReports = reports.filter((r) => ACTIONABLE.has(r.status));
+  const selectedCount = selectedItems.size;
 
-  const toggleSelect = (id: string) => {
-    setSelectedIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
+  const selectedByStatus: Record<string, string[]> = {};
+  for (const [, v] of selectedItems) {
+    if (!selectedByStatus[v.status]) selectedByStatus[v.status] = [];
+    selectedByStatus[v.status].push(v.actionId);
+  }
+
+  const toggleSelect = (r: Report) => {
+    const actionId = r.status === "AWAITING_PAYMENT" ? (r.paymentId || r.id) : r.id;
+    setSelectedItems((prev) => {
+      const next = new Map(prev);
+      if (next.has(r.id)) next.delete(r.id);
+      else next.set(r.id, { status: r.status, actionId });
       return next;
     });
   };
 
   const toggleSelectAll = () => {
-    if (allSendingSelected) {
-      // Deselect all sending
-      setSelectedIds((prev) => {
-        const next = new Set(prev);
-        for (const r of sendingReports) next.delete(r.id);
-        return next;
-      });
+    if (selectedCount === actionableReports.length && actionableReports.length > 0) {
+      setSelectedItems(new Map());
     } else {
-      // Select all sending
-      setSelectedIds((prev) => {
-        const next = new Set(prev);
-        for (const r of sendingReports) next.add(r.id);
-        return next;
-      });
-    }
-  };
-
-  const handleBatchSend = async () => {
-    if (selectedIds.size === 0) return;
-    if (!confirm(`确认向 ${selectedIds.size} 位用户发送成长手册邮件？`)) return;
-    setBatchSending(true);
-    try {
-      const res = await fetch("/api/admin/reports/batch-send", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ handbookIds: Array.from(selectedIds) }),
-      });
-      if (res.ok) {
-        const data = await res.json();
-        alert(`发送完成：成功 ${data.sent} 封${data.failed > 0 ? `，失败 ${data.failed} 封` : ""}`);
-        setSelectedIds(new Set());
-        await fetchReports();
-      } else {
-        const err = await res.json();
-        alert(err.error || "发送失败");
+      const next = new Map<string, { status: string; actionId: string }>();
+      for (const r of actionableReports) {
+        const actionId = r.status === "AWAITING_PAYMENT" ? (r.paymentId || r.id) : r.id;
+        next.set(r.id, { status: r.status, actionId });
       }
-    } catch {
-      alert("网络错误");
+      setSelectedItems(next);
     }
-    setBatchSending(false);
   };
 
+  const allActionableSelected = actionableReports.length > 0 && selectedCount === actionableReports.length;
+
+  /* ── Single payment confirm (for row button) ── */
   const handleConfirmPayment = async (paymentId: string) => {
     if (!confirm("确认该笔支付？确认后将自动生成报告。")) return;
     setConfirmingPayment(paymentId);
@@ -187,6 +161,210 @@ function ReportsTab() {
     setConfirmingPayment(null);
   };
 
+  /* ── Batch operations ── */
+  const handleBatchConfirm = async () => {
+    const ids = selectedByStatus["AWAITING_PAYMENT"];
+    if (!ids || ids.length === 0) return;
+    if (!confirm(`确认 ${ids.length} 笔支付？确认后将自动生成报告。`)) return;
+    setBatchWorking(true);
+    try {
+      const res = await fetch("/api/admin/payments/batch-confirm", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ paymentIds: ids }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        alert(`批量确认完成：成功 ${data.confirmed} 笔${data.failed > 0 ? `，失败 ${data.failed} 笔` : ""}`);
+        setSelectedItems(new Map());
+        await fetchReports();
+      } else {
+        const err = await res.json();
+        alert(err.error || "批量确认失败");
+      }
+    } catch {
+      alert("网络错误");
+    }
+    setBatchWorking(false);
+  };
+
+  const handleBatchGenerate = async () => {
+    const ids = selectedByStatus["ANALYZING"];
+    if (!ids || ids.length === 0) return;
+    if (!confirm(`确认为 ${ids.length} 份报告生成 AI 内容？`)) return;
+    setBatchWorking(true);
+    try {
+      const res = await fetch("/api/admin/reports/batch-generate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ handbookIds: ids }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        alert(`批量生成完成：成功 ${data.generated} 份${data.failed > 0 ? `，失败 ${data.failed} 份` : ""}`);
+        setSelectedItems(new Map());
+        await fetchReports();
+      } else {
+        const err = await res.json();
+        alert(err.error || "批量生成失败");
+      }
+    } catch {
+      alert("网络错误");
+    }
+    setBatchWorking(false);
+  };
+
+  const handleBatchApprove = async () => {
+    const ids = selectedByStatus["REVIEWING"];
+    if (!ids || ids.length === 0) return;
+    if (!confirm(`确认审核通过 ${ids.length} 份报告？`)) return;
+    setBatchWorking(true);
+    try {
+      const promises = ids.map((id) =>
+        fetch(`/api/admin/reports/${id}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ status: "SENDING" }),
+        })
+      );
+      const results = await Promise.allSettled(promises);
+      const ok = results.filter((r) => r.status === "fulfilled").length;
+      alert(`批量审核完成：成功 ${ok} 份${results.length - ok > 0 ? `，失败 ${results.length - ok} 份` : ""}`);
+      setSelectedItems(new Map());
+      await fetchReports();
+    } catch {
+      alert("网络错误");
+    }
+    setBatchWorking(false);
+  };
+
+  const handleBatchSend = async () => {
+    const ids = selectedByStatus["SENDING"];
+    if (!ids || ids.length === 0) return;
+    if (!confirm(`确认向 ${ids.length} 位用户发送成长手册邮件？`)) return;
+    setBatchWorking(true);
+    try {
+      const res = await fetch("/api/admin/reports/batch-send", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ handbookIds: ids }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        alert(`发送完成：成功 ${data.sent} 封${data.failed > 0 ? `，失败 ${data.failed} 封` : ""}`);
+        setSelectedItems(new Map());
+        await fetchReports();
+      } else {
+        const err = await res.json();
+        alert(err.error || "发送失败");
+      }
+    } catch {
+      alert("网络错误");
+    }
+    setBatchWorking(false);
+  };
+
+  /* ── Download handlers ── */
+  const getSelectedAssessmentIds = () => {
+    return Array.from(selectedItems.keys())
+      .map((rowId) => reports.find((r) => r.id === rowId)?.assessmentId)
+      .filter((id): id is string => !!id);
+  };
+
+  const handleDownloadAnswers = async () => {
+    const ids = getSelectedAssessmentIds();
+    if (ids.length === 0) return;
+    setDownloading(true);
+    try {
+      const res = await fetch("/api/admin/reports/batch-export", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ assessmentIds: ids }),
+      });
+      if (!res.ok) { alert("导出失败"); setDownloading(false); return; }
+      const { reports } = await res.json();
+
+      // Build CSV
+      const rows: string[] = ["学生,邮箱,年级,题号,系统,维度,模块,题目,答案,得分"];
+      const answerLabels: Record<string, string> = {
+        ALWAYS: "总是", OFTEN: "经常", SOMETIMES: "偶尔", RARELY: "极少", UNKNOWN: "不了解",
+      };
+      for (const r of reports) {
+        for (const a of r.answers) {
+          const esc = (s: string) => `"${(s || "").replace(/"/g, '""')}"`;
+          rows.push([
+            esc(r.studentName), esc(r.email), esc(r.grade),
+            a.order, esc(a.system), esc(a.dimension), esc(a.module),
+            esc(a.content), esc(answerLabels[a.answer] || a.answer), a.score ?? "",
+          ].join(","));
+        }
+      }
+      const bom = "\uFEFF";
+      const blob = new Blob([bom + rows.join("\n")], { type: "text/csv;charset=utf-8" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `原答卷_${new Date().toISOString().slice(0, 10)}_${reports.length}份.csv`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch { alert("下载失败"); }
+    setDownloading(false);
+  };
+
+  const handleDownloadReports = async () => {
+    const ids = getSelectedAssessmentIds();
+    if (ids.length === 0) return;
+    setDownloading(true);
+    try {
+      const res = await fetch("/api/admin/reports/batch-export", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ assessmentIds: ids }),
+      });
+      if (!res.ok) { alert("导出失败"); setDownloading(false); return; }
+      const { reports } = await res.json();
+
+      for (const r of reports) {
+        if (!r.contentHtml) continue;
+        const fullHtml = `<!DOCTYPE html><html lang="zh-CN"><head><meta charset="utf-8">
+<title>成长导航手册 - ${r.studentName || r.email}</title>
+<style>
+body{max-width:760px;margin:40px auto;padding:0 20px;font-family:-apple-system,sans-serif;color:#333;line-height:1.8}
+h1{font-size:1.6rem;border-left:4px solid #6a9b1e;padding-left:12px;margin-top:2.5rem}
+h2{font-size:1.3rem;border-left:4px solid #86b930;padding-left:12px;margin-top:2rem}
+h3{font-size:1.1rem;padding-left:10px;border-left:3px solid #a3cc52;margin-top:1.5rem}
+p{margin-bottom:1rem}
+ul,ol{padding-left:1.5rem;margin-bottom:1rem}
+li{margin-bottom:0.5rem}
+table{width:100%;border-collapse:collapse;margin:1rem 0}
+th,td{border:1px solid #ddd;padding:8px 12px;text-align:left}
+th{background:#f8fdf0}
+strong{color:#111}
+blockquote{border-left:4px solid #86b930;padding:12px 16px;background:#f8fdf0;margin:1rem 0}
+@media print{body{margin:0}h1,h2,h3{page-break-after:avoid}}
+</style></head><body>
+<h1>成长导航手册</h1>
+<p><strong>学生：</strong>${r.studentName || "—"} &nbsp; <strong>年级：</strong>${r.grade || "—"} &nbsp; <strong>邮箱：</strong>${r.email}</p>
+<hr>
+${r.contentHtml}
+</body></html>`;
+        const blob = new Blob([fullHtml], { type: "text/html;charset=utf-8" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = `成长导航手册_${r.studentName || r.email}.html`;
+        a.click();
+        URL.revokeObjectURL(url);
+        // Small delay between downloads to avoid browser blocking
+        await new Promise((resolve) => setTimeout(resolve, 300));
+      }
+    } catch { alert("下载失败"); }
+    setDownloading(false);
+  };
+
+  const showCheckboxes = actionableReports.length > 0;
+  const colCount = showCheckboxes ? 7 : 6;
+
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
@@ -205,19 +383,42 @@ function ReportsTab() {
             </button>
           ))}
         </div>
-        {selectedIds.size > 0 && (
-          <Button
-            size="sm"
-            onClick={handleBatchSend}
-            disabled={batchSending}
-            className="gap-1.5 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700"
-          >
-            {batchSending ? (
-              <><RefreshCw className="h-3.5 w-3.5 animate-spin" />发送中...</>
-            ) : (
-              <><Mail className="h-3.5 w-3.5" />批量发送邮件 ({selectedIds.size})</>
+        {selectedCount > 0 && (
+          <div className="flex items-center gap-2">
+            <span className="text-xs text-muted-foreground">已选 {selectedCount} 项</span>
+            {(selectedByStatus["AWAITING_PAYMENT"]?.length ?? 0) > 0 && (
+              <Button size="sm" onClick={handleBatchConfirm} disabled={batchWorking}
+                className="gap-1.5 rounded-lg bg-[#6a9b1e] text-white hover:bg-[#5a8518]">
+                {batchWorking ? <><RefreshCw className="h-3.5 w-3.5 animate-spin" />处理中...</> : <><Check className="h-3.5 w-3.5" />批量确认支付 ({selectedByStatus["AWAITING_PAYMENT"].length})</>}
+              </Button>
             )}
-          </Button>
+            {(selectedByStatus["ANALYZING"]?.length ?? 0) > 0 && (
+              <Button size="sm" onClick={handleBatchGenerate} disabled={batchWorking}
+                className="gap-1.5 rounded-lg bg-blue-600 text-white hover:bg-blue-700">
+                {batchWorking ? <><RefreshCw className="h-3.5 w-3.5 animate-spin" />生成中...</> : <><Sparkles className="h-3.5 w-3.5" />批量生成报告 ({selectedByStatus["ANALYZING"].length})</>}
+              </Button>
+            )}
+            {(selectedByStatus["REVIEWING"]?.length ?? 0) > 0 && (
+              <Button size="sm" onClick={handleBatchApprove} disabled={batchWorking}
+                className="gap-1.5 rounded-lg bg-amber-600 text-white hover:bg-amber-700">
+                {batchWorking ? <><RefreshCw className="h-3.5 w-3.5 animate-spin" />处理中...</> : <><CheckCircle className="h-3.5 w-3.5" />批量审核通过 ({selectedByStatus["REVIEWING"].length})</>}
+              </Button>
+            )}
+            {(selectedByStatus["SENDING"]?.length ?? 0) > 0 && (
+              <Button size="sm" onClick={handleBatchSend} disabled={batchWorking}
+                className="gap-1.5 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700">
+                {batchWorking ? <><RefreshCw className="h-3.5 w-3.5 animate-spin" />发送中...</> : <><Mail className="h-3.5 w-3.5" />批量发送邮件 ({selectedByStatus["SENDING"].length})</>}
+              </Button>
+            )}
+            <Button size="sm" variant="outline" onClick={handleDownloadAnswers} disabled={downloading}
+              className="gap-1.5 rounded-lg">
+              {downloading ? <><RefreshCw className="h-3.5 w-3.5 animate-spin" />导出中...</> : <><Download className="h-3.5 w-3.5" />下载答卷</>}
+            </Button>
+            <Button size="sm" variant="outline" onClick={handleDownloadReports} disabled={downloading}
+              className="gap-1.5 rounded-lg">
+              {downloading ? <><RefreshCw className="h-3.5 w-3.5 animate-spin" />导出中...</> : <><Download className="h-3.5 w-3.5" />下载报告</>}
+            </Button>
+          </div>
         )}
       </div>
 
@@ -225,14 +426,14 @@ function ReportsTab() {
         <table className="w-full text-sm">
           <thead>
             <tr className="border-b border-border bg-secondary/50">
-              {sendingReports.length > 0 && (
+              {showCheckboxes && (
                 <th className="w-10 px-4 py-3">
                   <input
                     type="checkbox"
-                    checked={allSendingSelected}
+                    checked={allActionableSelected}
                     onChange={toggleSelectAll}
                     className="h-4 w-4 rounded border-gray-300 accent-emerald-600"
-                    title="全选发送中的报告"
+                    title="全选可操作项"
                   />
                 </th>
               )}
@@ -246,22 +447,22 @@ function ReportsTab() {
           </thead>
           <tbody>
             {loading ? (
-              <tr><td colSpan={sendingReports.length > 0 ? 7 : 6} className="px-4 py-12 text-center text-muted-foreground">加载中...</td></tr>
+              <tr><td colSpan={colCount} className="px-4 py-12 text-center text-muted-foreground">加载中...</td></tr>
             ) : reports.length === 0 ? (
-              <tr><td colSpan={sendingReports.length > 0 ? 7 : 6} className="px-4 py-12 text-center text-muted-foreground">暂无报告</td></tr>
+              <tr><td colSpan={colCount} className="px-4 py-12 text-center text-muted-foreground">暂无报告</td></tr>
             ) : (
               reports.map((r) => {
                 const badge = STATUS_LABELS[r.status] || { label: r.status, cls: "bg-secondary text-muted-foreground" };
-                const canSelect = r.status === "SENDING";
+                const canSelect = ACTIONABLE.has(r.status);
                 return (
-                  <tr key={r.id} className={`border-b border-border hover:bg-secondary/30 ${selectedIds.has(r.id) ? "bg-emerald-50/50" : ""}`}>
-                    {sendingReports.length > 0 && (
+                  <tr key={r.id} className={`border-b border-border hover:bg-secondary/30 ${selectedItems.has(r.id) ? "bg-emerald-50/50" : ""}`}>
+                    {showCheckboxes && (
                       <td className="px-4 py-3">
                         {canSelect ? (
                           <input
                             type="checkbox"
-                            checked={selectedIds.has(r.id)}
-                            onChange={() => toggleSelect(r.id)}
+                            checked={selectedItems.has(r.id)}
+                            onChange={() => toggleSelect(r)}
                             className="h-4 w-4 rounded border-gray-300 accent-emerald-600"
                           />
                         ) : (
@@ -304,9 +505,9 @@ function ReportsTab() {
       </div>
       <div className="flex items-center justify-between">
         <p className="text-xs text-muted-foreground">共 {total} 份报告</p>
-        {sendingReports.length > 0 && (
+        {actionableReports.length > 0 && (
           <p className="text-xs text-muted-foreground">
-            {sendingReports.length} 份待发送 · 已选 {selectedIds.size} 份
+            {actionableReports.length} 项可操作 · 已选 {selectedCount} 项
           </p>
         )}
       </div>
