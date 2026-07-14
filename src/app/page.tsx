@@ -17,9 +17,9 @@ export default function HomePage() {
           className="hero-fade-up max-w-2xl text-3xl font-semibold leading-tight tracking-tight text-foreground md:text-5xl md:leading-[1.15]"
           style={{ animationDelay: "0s" }}
         >
-          看清真问题，
+          全面测评学习力，
           <br />
-          找到撬动成长的关键支点。
+          发现学习中的真问题。
         </h1>
 
         <p

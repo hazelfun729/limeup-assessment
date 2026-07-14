@@ -5,6 +5,7 @@ import { useRouter, useParams } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import { ChevronLeft, ChevronRight, Check } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { StageTransition } from "@/components/stage-transition";
 import {
   STAGES,
   TOTAL_QUESTIONS,
@@ -34,18 +35,23 @@ export default function AssessmentQuestionPage() {
   const [showStageComplete, setShowStageComplete] = useState(false);
   const [completedStage, setCompletedStage] = useState(0);
   const [skipping, setSkipping] = useState(false);
+  const [showTransition, setShowTransition] = useState<number | null>(null);
 
   // Ref for debounced API save
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Load saved progress from localStorage + fetch questions from API
   useEffect(() => {
+    let hasSavedProgress = false;
     const saved = localStorage.getItem(STORAGE_KEY_PREFIX + assessmentId);
     if (saved) {
       try {
         const parsed = JSON.parse(saved);
         setAnswers(parsed.answers || {});
         setCurrentQ(parsed.currentQ || 1);
+        if ((parsed.answers && Object.keys(parsed.answers).length > 0) || (parsed.currentQ && parsed.currentQ > 1)) {
+          hasSavedProgress = true;
+        }
       } catch {
         // ignore parse errors
       }
@@ -62,6 +68,11 @@ export default function AssessmentQuestionPage() {
         if (data?.answers && Object.keys(data.answers).length > 0 && !saved) {
           setAnswers(data.answers);
           if (data.currentQuestion) setCurrentQ(data.currentQuestion);
+          hasSavedProgress = true;
+        }
+        // Show stage 1 transition for fresh users (no saved progress)
+        if (!hasSavedProgress) {
+          setShowTransition(1);
         }
       })
       .catch(() => {})
@@ -175,11 +186,10 @@ export default function AssessmentQuestionPage() {
   const handleStageContinue = () => {
     setShowStageComplete(false);
     if (completedStage < 3) {
-      setCurrentQ(STAGES[completedStage].questionRange[0]);
+      // Show transition animation for the next stage before entering questions
+      setShowTransition(completedStage + 1);
     } else {
       // All done — redirect immediately, save answers in background
-      // Save to localStorage immediately (already done by useEffect)
-      // Fire-and-forget API save
       fetch(`/api/assessment/${assessmentId}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
@@ -188,6 +198,13 @@ export default function AssessmentQuestionPage() {
       router.push(`/register?assessmentId=${assessmentId}`);
     }
   };
+
+  const onTransitionComplete = useCallback(() => {
+    setShowTransition(null);
+    if (showTransition && showTransition >= 1) {
+      setCurrentQ(STAGES[showTransition - 1].questionRange[0]);
+    }
+  }, [showTransition]);
 
   const handlePrev = () => {
     if (currentQ > 1) setCurrentQ(currentQ - 1);
@@ -232,6 +249,11 @@ export default function AssessmentQuestionPage() {
 
   return (
     <main className="flex min-h-dvh flex-col bg-background">
+      {/* Stage transition overlay */}
+      {showTransition && (
+        <StageTransition stage={showTransition} onComplete={onTransitionComplete} />
+      )}
+
       {/* Progress header */}
       <header className="sticky top-0 z-10 border-b border-border bg-background/80 backdrop-blur-sm">
         <div className="mx-auto flex max-w-2xl items-center gap-4 px-6 py-4">
