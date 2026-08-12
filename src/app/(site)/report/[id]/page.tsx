@@ -111,15 +111,26 @@ const MODULE_DIM_MAP: Record<string, string> = {
 // Helper Functions
 // ==========================================
 
+function decodeEntities(str: string): string {
+  let result = str;
+  let prev = "";
+  while (prev !== result) {
+    prev = result;
+    result = result
+      .replace(/&amp;/g, "&")
+      .replace(/&lt;/g, "<")
+      .replace(/&gt;/g, ">")
+      .replace(/&quot;/g, '"')
+      .replace(/&#39;/g, "'");
+  }
+  return result;
+}
+
 function sanitizeHtml(raw: string): string {
   let html = raw.trim();
   const preMatch = html.match(/<pre><code[^>]*>([\s\S]*?)<\/code><\/pre>/i);
   if (preMatch) {
-    html = preMatch[1]
-      .replace(/&lt;/g, "<")
-      .replace(/&gt;/g, ">")
-      .replace(/&amp;/g, "&")
-      .replace(/&quot;/g, '"');
+    html = decodeEntities(preMatch[1]);
   }
   const fenceMatch = html.match(/^```(?:html|HTML)?\s*\n([\s\S]*?)\n```\s*$/);
   if (fenceMatch) {
@@ -1133,11 +1144,14 @@ export default function ReportPage() {
 // ==========================================
 
 const REPORT_CSS = `
+@import url('https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@400;600;700&display=swap');
+
 /* ===== Report Prose Styling ===== */
 .report-prose {
   max-width: 760px;
 }
 .report-prose h1 {
+  font-family: "Noto Serif SC", "Songti SC", "STSong", serif;
   font-size: 1.5rem;
   font-weight: 700;
   margin-top: 2.5rem;
@@ -1147,6 +1161,7 @@ const REPORT_CSS = `
   border-left: 4px solid #6a9b1e;
 }
 .report-prose h2 {
+  font-family: "Noto Serif SC", "Songti SC", "STSong", serif;
   font-size: 1.25rem;
   font-weight: 700;
   margin-top: 2rem;
@@ -1156,6 +1171,7 @@ const REPORT_CSS = `
   border-left: 4px solid #86b930;
 }
 .report-prose h3 {
+  font-family: "Noto Serif SC", "Songti SC", "STSong", serif;
   font-size: 1.1rem;
   font-weight: 600;
   margin-top: 1.5rem;

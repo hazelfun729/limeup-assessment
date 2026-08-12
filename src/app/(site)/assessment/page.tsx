@@ -20,7 +20,7 @@ export default function AssessmentStartPage() {
           throw new Error(data.error || "创建测评失败");
         }
         const { id } = await res.json();
-        router.replace(`/assessment/${id}`);
+        router.replace(`/transition?stage=1&assessmentId=${id}`);
       } catch (err) {
         console.error("Failed to create assessment:", err);
         setError(err instanceof Error ? err.message : "创建测评失败，请稍后重试");

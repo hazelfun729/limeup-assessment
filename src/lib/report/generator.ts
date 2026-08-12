@@ -8,7 +8,7 @@ import { marked } from "marked";
 
 const AI_BASE_URL = process.env.AI_BASE_URL || "https://api.deepseek.com";
 const AI_API_KEY = process.env.AI_API_KEY || "";
-const AI_MODEL = process.env.AI_MODEL || "deepseek-chat";
+const AI_MODEL = process.env.AI_MODEL || "deepseek-reasoner";
 
 /**
  * Strip code fences that LLMs sometimes wrap around their HTML output.
@@ -16,8 +16,8 @@ const AI_MODEL = process.env.AI_MODEL || "deepseek-chat";
  */
 function stripCodeFences(text: string): string {
   let result = text.trim();
-  // Remove ```html ... ``` or ``` ... ``` wrappers
-  const fenceMatch = result.match(/^```(?:html|HTML|Html)?\s*\n([\s\S]*?)\n```\s*$/);
+  // Remove ```html ... ``` or ``` ... ``` wrappers (handles both top-level and embedded fences)
+  const fenceMatch = result.match(/```(?:html|HTML|Html)?\s*\n([\s\S]*?)\n```/);
   if (fenceMatch) {
     result = fenceMatch[1].trim();
   }
@@ -153,12 +153,26 @@ function renderPrompt(template: string, ctx: Awaited<ReturnType<typeof buildCont
     rendered = rendered.replace(new RegExp(`\\{\\{${key}\\}\\}`, "g"), value);
   }
 
-  // Replace JSON variables
-  rendered = rendered.replace(/\{\{systemScores\}\}/g, JSON.stringify(ctx.systemScores, null, 2));
-  rendered = rendered.replace(/\{\{dimensionScores\}\}/g, JSON.stringify(ctx.dimensionScores, null, 2));
-  rendered = rendered.replace(/\{\{moduleScores\}\}/g, JSON.stringify(ctx.moduleScores, null, 2));
-  rendered = rendered.replace(/\{\{strengths\}\}/g, JSON.stringify(ctx.strengths, null, 2));
-  rendered = rendered.replace(/\{\{weaknesses\}\}/g, JSON.stringify(ctx.weaknesses, null, 2));
+  // Replace JSON variables — format as readable text instead of raw JSON
+  // Format system scores
+  const sysLines = Object.entries(ctx.systemScores as Record<string, number>)
+    .map(([code, score]) => {
+      const name = code === "D" ? "学习动力" : code === "A" ? "学习能力" : code === "P" ? "学习毅力" : code;
+      return `  ${code}（${name}）：${score}分`;
+    });
+  rendered = rendered.replace(/\{\{systemScores\}\}/g, sysLines.join("\n"));
+    const dimLines = Object.entries(ctx.dimensionScores as Record<string, number>)
+    .map(([code, score]) => `  ${code}：${score}分`);
+  rendered = rendered.replace(/\{\{dimensionScores\}\}/g, dimLines.join("\n"));
+    const modLines = Object.entries(ctx.moduleScores as Record<string, number>)
+    .map(([code, score]) => `  ${code}：${score}分`);
+  rendered = rendered.replace(/\{\{moduleScores\}\}/g, modLines.join("\n"));
+    const strLines = (ctx.strengths as Array<{ code: string; score: number }>)
+    .map((s, i) => `  ${i + 1}. ${s.code}（${s.score}分）`);
+  rendered = rendered.replace(/\{\{strengths\}\}/g, strLines.join("\n"));
+    const weakLines = (ctx.weaknesses as Array<{ code: string; score: number }>)
+    .map((w, i) => `  ${i + 1}. ${w.code}（${w.score}分）`);
+  rendered = rendered.replace(/\{\{weaknesses\}\}/g, weakLines.join("\n"));
 
   // Build detailed module scores table
   const moduleTable = Object.entries(ctx.moduleDetails)
@@ -195,6 +209,7 @@ async function callAI(systemPrompt: string, userPrompt: string): Promise<string>
         { role: "system", content: systemPrompt },
         { role: "user", content: userPrompt },
       ],
+      temperature: 0.3,
       max_tokens: 20000,
       reasoning_effort: "high",
       thinking: { type: "enabled" },
@@ -231,7 +246,7 @@ export async function generateHandbook(assessmentId: string): Promise<{
   if (isExcellent) {
     // Try to find 1型 prompt first
     prompt = await prisma.prompt.findFirst({
-      where: { type: "REPORT_GENERATION", name: { contains: "1型" } },
+      where: { isActive: true, type: "REPORT_GENERATION", name: { contains: "1型" } },
       orderBy: { version: "desc" },
     });
   }

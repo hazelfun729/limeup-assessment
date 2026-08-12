@@ -86,7 +86,8 @@ function ReportsTab() {
   const [loading, setLoading] = useState(true);
   const [selectedItems, setSelectedItems] = useState<Map<string, { status: string; actionId: string }>>(new Map());
   const [batchWorking, setBatchWorking] = useState(false);
-  const [downloading, setDownloading] = useState(false);
+  const [downloadingAnswers, setDownloadingAnswers] = useState(false);
+  const [downloadingReports, setDownloadingReports] = useState(false);
   const [confirmingPayment, setConfirmingPayment] = useState<string | null>(null);
 
   const fetchReports = useCallback(async () => {
@@ -142,14 +143,16 @@ function ReportsTab() {
   const allActionableSelected = actionableReports.length > 0 && selectedCount === actionableReports.length;
 
   /* ── Single payment confirm (for row button) ── */
-  const handleConfirmPayment = async (paymentId: string) => {
-    if (!confirm("确认该笔支付？确认后将自动生成报告。")) return;
+  const handleConfirmPayment = async (paymentId: string, handbookId: string) => {
+    if (!confirm("确认该笔支付？确认后将自动开始生成报告。")) return;
     setConfirmingPayment(paymentId);
     try {
       const res = await fetch(`/api/admin/payments/${paymentId}/confirm`, { method: "POST" });
       if (res.ok) {
         const data = await res.json();
-        alert(`支付已确认，报告状态: ${data.reportStatus === "REVIEWING" ? "待审核" : "分析中"}`);
+        // Trigger async generation in background — don't await
+        fetch(`/api/admin/reports/${handbookId}/generate`, { method: "POST" }).catch(() => {});
+        alert("支付已确认，报告生成中，请稍后刷新页面查看。");
         await fetchReports();
       } else {
         const err = await res.json();
@@ -274,54 +277,86 @@ function ReportsTab() {
   const handleDownloadAnswers = async () => {
     const ids = getSelectedAssessmentIds();
     if (ids.length === 0) return;
-    setDownloading(true);
+    setDownloadingAnswers(true);
     try {
       const res = await fetch("/api/admin/reports/batch-export", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ assessmentIds: ids }),
       });
-      if (!res.ok) { alert("导出失败"); setDownloading(false); return; }
-      const { reports } = await res.json();
+      if (!res.ok) { alert("导出失败"); setDownloadingAnswers(false); return; }
+      const { reports: data } = await res.json();
 
-      // Build CSV
-      const rows: string[] = ["学生,邮箱,年级,题号,系统,维度,模块,题目,答案,得分"];
       const answerLabels: Record<string, string> = {
         ALWAYS: "总是", OFTEN: "经常", SOMETIMES: "偶尔", RARELY: "极少", UNKNOWN: "不了解",
       };
-      for (const r of reports) {
+      const esc = (s: string) => `"${(s || "").replace(/"/g, '""')}"`;
+
+      // Collect all unique questions across all students, sorted by order
+      const questionMap = new Map<number, { order: number; content: string; system: string; dimension: string; module: string }>();
+      for (const r of data) {
         for (const a of r.answers) {
-          const esc = (s: string) => `"${(s || "").replace(/"/g, '""')}"`;
-          rows.push([
-            esc(r.studentName), esc(r.email), esc(r.grade),
-            a.order, esc(a.system), esc(a.dimension), esc(a.module),
-            esc(a.content), esc(answerLabels[a.answer] || a.answer), a.score ?? "",
-          ].join(","));
+          if (!questionMap.has(a.order)) {
+            questionMap.set(a.order, { order: a.order, content: a.content, system: a.system, dimension: a.dimension, module: a.module });
+          }
         }
       }
+      const questions = Array.from(questionMap.values()).sort((a, b) => a.order - b.order);
+
+      // Build horizontal CSV: columns = questions, rows = metadata + per-student answers/scores
+      const rows: string[] = [];
+
+      // Header rows (question metadata)
+      rows.push(["题号", ...questions.map((q) => q.order)].join(","));
+      rows.push(["题目", ...questions.map((q) => esc(q.content))].join(","));
+      rows.push(["系统", ...questions.map((q) => esc(q.system))].join(","));
+      rows.push(["维度", ...questions.map((q) => esc(q.dimension))].join(","));
+      rows.push(["模块", ...questions.map((q) => esc(q.module))].join(","));
+
+      // Per-student rows
+      for (const r of data) {
+        const ansMap = new Map<number, { answer: string }>();
+        const scoreMap = new Map<number, number | null>();
+        for (const a of r.answers) {
+          ansMap.set(a.order, a);
+          scoreMap.set(a.order, a.score);
+        }
+
+        rows.push(["学生", ...questions.map(() => esc(r.studentName))].join(","));
+        rows.push(["邮箱", ...questions.map(() => esc(r.email))].join(","));
+        rows.push(["答案", ...questions.map((q) => {
+          const a = ansMap.get(q.order);
+          return esc(a ? (answerLabels[a.answer] || a.answer) : "");
+        })].join(","));
+        rows.push(["得分", ...questions.map((q) => {
+          const s = scoreMap.get(q.order);
+          return s != null ? String(s) : "";
+        })].join(","));
+      }
+
       const bom = "\uFEFF";
       const blob = new Blob([bom + rows.join("\n")], { type: "text/csv;charset=utf-8" });
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = `原答卷_${new Date().toISOString().slice(0, 10)}_${reports.length}份.csv`;
+      a.download = `原答卷_${new Date().toISOString().slice(0, 10)}_${data.length}份.csv`;
       a.click();
       URL.revokeObjectURL(url);
     } catch { alert("下载失败"); }
-    setDownloading(false);
+    setDownloadingAnswers(false);
   };
 
   const handleDownloadReports = async () => {
     const ids = getSelectedAssessmentIds();
     if (ids.length === 0) return;
-    setDownloading(true);
+    setDownloadingReports(true);
     try {
       const res = await fetch("/api/admin/reports/batch-export", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ assessmentIds: ids }),
       });
-      if (!res.ok) { alert("导出失败"); setDownloading(false); return; }
+      if (!res.ok) { alert("导出失败"); setDownloadingReports(false); return; }
       const { reports } = await res.json();
 
       for (const r of reports) {
@@ -355,11 +390,10 @@ ${r.contentHtml}
         a.download = `成长导航手册_${r.studentName || r.email}.html`;
         a.click();
         URL.revokeObjectURL(url);
-        // Small delay between downloads to avoid browser blocking
         await new Promise((resolve) => setTimeout(resolve, 300));
       }
     } catch { alert("下载失败"); }
-    setDownloading(false);
+    setDownloadingReports(false);
   };
 
   const showCheckboxes = actionableReports.length > 0;
@@ -410,13 +444,13 @@ ${r.contentHtml}
                 {batchWorking ? <><RefreshCw className="h-3.5 w-3.5 animate-spin" />发送中...</> : <><Mail className="h-3.5 w-3.5" />批量发送邮件 ({selectedByStatus["SENDING"].length})</>}
               </Button>
             )}
-            <Button size="sm" variant="outline" onClick={handleDownloadAnswers} disabled={downloading}
+            <Button size="sm" variant="outline" onClick={handleDownloadAnswers} disabled={downloadingAnswers || downloadingReports}
               className="gap-1.5 rounded-lg">
-              {downloading ? <><RefreshCw className="h-3.5 w-3.5 animate-spin" />导出中...</> : <><Download className="h-3.5 w-3.5" />下载答卷</>}
+              {downloadingAnswers ? <><RefreshCw className="h-3.5 w-3.5 animate-spin" />导出中...</> : <><Download className="h-3.5 w-3.5" />下载答卷</>}
             </Button>
-            <Button size="sm" variant="outline" onClick={handleDownloadReports} disabled={downloading}
+            <Button size="sm" variant="outline" onClick={handleDownloadReports} disabled={downloadingAnswers || downloadingReports}
               className="gap-1.5 rounded-lg">
-              {downloading ? <><RefreshCw className="h-3.5 w-3.5 animate-spin" />导出中...</> : <><Download className="h-3.5 w-3.5" />下载报告</>}
+              {downloadingReports ? <><RefreshCw className="h-3.5 w-3.5 animate-spin" />导出中...</> : <><Download className="h-3.5 w-3.5" />下载报告</>}
             </Button>
           </div>
         )}
@@ -480,7 +514,7 @@ ${r.contentHtml}
                     <td className="px-4 py-3">
                       {r.status === "AWAITING_PAYMENT" ? (
                         <button
-                          onClick={() => r.paymentId && handleConfirmPayment(r.paymentId)}
+                          onClick={() => r.paymentId && handleConfirmPayment(r.paymentId, r.id)}
                           disabled={confirmingPayment === r.paymentId}
                           className="inline-flex items-center gap-1 rounded-lg bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground hover:brightness-95 disabled:opacity-50"
                         >

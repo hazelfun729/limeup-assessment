@@ -1,11 +1,12 @@
-/**
- * Seed script: Report Generation Prompt Templates (v3 - 20260731)
- * Includes both 2-27型 (default) and 1型 (excellent students) prompts.
- * Usage: npx tsx prisma/seed/seed-prompt.ts
- */
-import { createPrismaClient } from "./prisma-helper";
+import { PrismaClient } from "../../src/generated/prisma/client";
+import { PrismaBetterSqlite3 } from "@prisma/adapter-better-sqlite3";
+import path from "path";
 
-// ─── Shared template variables header ───
+const dbPath = path.resolve("prisma/dev.db");
+const adapter = new PrismaBetterSqlite3({ url: `file:${dbPath}` });
+const prisma = new PrismaClient({ adapter });
+
+// ─── 模板变量头部（两种类型共享） ───
 const TEMPLATE_HEADER = `文档《序号》为测评结果，文档《学习模式类型诊断》为测评结果的得分总结，并已得出孩子测评学习类型，请根据《3-9-27模型》和《学习模式分析建议》给出测评报告。
 
 ## 学生基本信息
@@ -47,8 +48,8 @@ const TEMPLATE_HEADER = `文档《序号》为测评结果，文档《学习模�
 
 ## 报告格式和具体要求`;
 
-// ─── 2-27型 (default, for students needing breakthrough) ───
-const REPORT_GENERATION_PROMPT = `${TEMPLATE_HEADER}
+// ─── 2-27型 报告生成提示词 ───
+const PROMPT_2_27 = `${TEMPLATE_HEADER}
 
 报告的格式和具体要求如下：
 
@@ -121,8 +122,8 @@ const REPORT_GENERATION_PROMPT = `${TEMPLATE_HEADER}
 6. 篇幅要求：总字数不少于5000字，确保内容充实、有深度
 7. 语言：中文`;
 
-// ─── 1型 (for excellent students, 2+ strong systems) ───
-const REPORT_GENERATION_PROMPT_1 = `${TEMPLATE_HEADER}
+// ─── 1型（优秀学生）报告生成提示词 ───
+const PROMPT_1 = `${TEMPLATE_HEADER}
 
 报告中不需要体现孩子具体每项的得分或者关联到哪一题，只需要认真分析和总结就可以。
 
@@ -196,109 +197,77 @@ const REPORT_GENERATION_PROMPT_1 = `${TEMPLATE_HEADER}
 6. 篇幅要求：总字数不少于5000字，确保内容充实、有深度
 7. 语言：中文`;
 
+// ─── 系统提示词 ───
 const SYSTEM_PROMPT = `你是一位资深教育咨询师，拥有10年以上青少年学习力诊断与成长规划经验。你擅长将专业的测评数据转化为家长能理解、能执行的具体建议。你的文字温暖、专业、有深度。请严格按照用户给出的报告格式和要求输出完整的报告内容，不要遗漏任何章节。`;
 
-async function seedReportPrompt(
-  prisma: Awaited<ReturnType<typeof createPrismaClient>>,
-  name: string,
-  content: string,
-  description: string,
-) {
-  const latest = await prisma.prompt.findFirst({
-    where: { type: "REPORT_GENERATION", name },
-    orderBy: { version: "desc" },
-  });
-
-  if (latest && latest.content === content) {
-    // Content matches — just make sure it's active (may have been deactivated by blanket cleanup)
-    if (!latest.isActive) {
-      await prisma.prompt.update({ where: { id: latest.id }, data: { isActive: true } });
-      console.log(`  [${name}] re-activated at v${latest.version} (content unchanged)`);
-    } else {
-      console.log(`  [${name}] unchanged at v${latest.version}, skipping`);
-    }
-    return;
-  }
-
-  // Deactivate ALL active REPORT_GENERATION prompts (not just same name) to prevent stale duplicates
+async function main() {
+  // 1. Deactivate all existing active prompts
   await prisma.prompt.updateMany({
     where: { type: "REPORT_GENERATION", isActive: true },
     data: { isActive: false },
   });
-
-  const newVersion = latest ? latest.version + 1 : 1;
-  const prompt = await prisma.prompt.create({
-    data: { name, type: "REPORT_GENERATION", content, version: newVersion, isActive: true, description },
+  await prisma.prompt.updateMany({
+    where: { type: "AI_CHECK", isActive: true },
+    data: { isActive: false },
   });
-  console.log(`  [${name}] ${latest ? "updated to" : "created at"} v${newVersion}: ${prompt.id}`);
-}
 
-async function main() {
-  const prisma = await createPrismaClient();
-
-  console.log("Seeding report generation prompts (v3 - 20260731)...");
-
-  // 1. Seed 2-27型 (default)
-  await seedReportPrompt(
-    prisma,
-    "成长导航手册生成",
-    REPORT_GENERATION_PROMPT,
-    "2-27型：适用于需要突破的学生，6章+结语",
-  );
-
-  // 2. Seed 1型 (excellent students)
-  await seedReportPrompt(
-    prisma,
-    "成长导航手册生成-1型",
-    REPORT_GENERATION_PROMPT_1,
-    "1型：适用于优秀学生，从优秀到卓越",
-  );
-
-  // 3. Seed system prompt (AI_CHECK)
-  const existingAI = await prisma.prompt.findFirst({
-    where: { type: "AI_CHECK", name: "AI报告质量检查" },
+  // 2. Get next version number
+  const latestReport = await prisma.prompt.findFirst({
+    where: { type: "REPORT_GENERATION" },
     orderBy: { version: "desc" },
+    select: { version: true },
+  });
+  const nextVersion = (latestReport?.version || 0) + 1;
+
+  // 3. Create 2-27型 prompt (active, default)
+  const promptDefault = await prisma.prompt.create({
+    data: {
+      name: "成长导航手册生成",
+      type: "REPORT_GENERATION",
+      content: PROMPT_2_27,
+      description: "2-27型：适用于需要突破的学生，6章+结语（v3 - 20260731更新）",
+      version: nextVersion,
+      isActive: true,
+    },
   });
 
-  if (!existingAI) {
-    await prisma.prompt.create({
-      data: {
-        name: "AI报告质量检查",
-        type: "AI_CHECK",
-        content: SYSTEM_PROMPT,
-        version: 1,
-        isActive: true,
-        description: "系统提示词，用于报告生成和AI辅助修改",
-      },
-    });
-    console.log("  [AI报告质量检查] created");
-  } else if (!existingAI.isActive || existingAI.content !== SYSTEM_PROMPT) {
-    const newVersion = existingAI.version + 1;
-    await prisma.prompt.updateMany({
-      where: { type: "AI_CHECK", name: "AI报告质量检查" },
-      data: { isActive: false },
-    });
-    await prisma.prompt.create({
-      data: {
-        name: "AI报告质量检查",
-        type: "AI_CHECK",
-        content: SYSTEM_PROMPT,
-        version: newVersion,
-        isActive: true,
-        description: "系统提示词，用于报告生成和AI辅助修改",
-      },
-    });
-    console.log(`  [AI报告质量检查] updated to v${newVersion}`);
-  } else {
-    console.log(`  [AI报告质量检查] unchanged at v${existingAI.version}, skipping`);
-  }
+  // 4. Create 1型 prompt (active, for excellent students)
+  const promptExcellent = await prisma.prompt.create({
+    data: {
+      name: "成长导航手册生成-1型",
+      type: "REPORT_GENERATION",
+      content: PROMPT_1,
+      description: "1型：适用于优秀学生，从优秀到卓越（v3 - 20260731新增）",
+      version: nextVersion,
+      isActive: true,
+    },
+  });
 
-  await prisma.$disconnect();
-  console.log("Done.");
+  // 5. Create system prompt
+  const latestSystem = await prisma.prompt.findFirst({
+    where: { type: "AI_CHECK" },
+    orderBy: { version: "desc" },
+    select: { version: true },
+  });
+  const nextSysVersion = (latestSystem?.version || 0) + 1;
+
+  const systemPrompt = await prisma.prompt.create({
+    data: {
+      name: "AI报告系统提示词",
+      type: "AI_CHECK",
+      content: SYSTEM_PROMPT,
+      description: "报告生成的系统角色设定",
+      version: nextSysVersion,
+      isActive: true,
+    },
+  });
+
+  console.log("✅ 提示词已更新 (v3 - 20260731):");
+  console.log(`  2-27型 REPORT_GENERATION: ${promptDefault.id} (v${promptDefault.version}, active)`);
+  console.log(`  1型 REPORT_GENERATION:    ${promptExcellent.id} (v${promptExcellent.version}, active)`);
+  console.log(`  AI_CHECK:                 ${systemPrompt.id} (v${systemPrompt.version}, active)`);
 }
 
 main()
-  .catch((e) => {
-    console.error("Seed failed:", e);
-    process.exit(1);
-  });
+  .catch(console.error)
+  .finally(() => prisma.$disconnect());

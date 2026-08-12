@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import {
@@ -8,8 +9,9 @@ import {
   FileText,
   HelpCircle,
   LogOut,
-  ChevronLeft,
+  User,
   Settings2,
+  Shield,
 } from "lucide-react";
 
 const NAV_ITEMS = [
@@ -18,11 +20,20 @@ const NAV_ITEMS = [
   { href: "/admin/reports", label: "报告管理", icon: FileText },
   { href: "/admin/questions", label: "题库管理", icon: HelpCircle },
   { href: "/admin/prompts", label: "报告设置", icon: Settings2 },
+  { href: "/admin/admins", label: "管理员管理", icon: Shield },
 ];
 
 function AdminSidebar() {
   const pathname = usePathname();
   const router = useRouter();
+  const [adminName, setAdminName] = useState("");
+
+  useEffect(() => {
+    fetch("/api/admin/account")
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => { if (data?.username) setAdminName(data.username); })
+      .catch(() => {});
+  }, []);
 
   const handleLogout = async () => {
     await fetch("/api/admin/login", { method: "DELETE" });
@@ -65,10 +76,21 @@ function AdminSidebar() {
       </nav>
 
       {/* Footer */}
-      <div className="border-t border-border px-3 py-3">
+      <div className="space-y-1 border-t border-border px-3 py-3">
+        <Link
+          href="/admin/account"
+          className={`flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors ${
+            pathname === "/admin/account"
+              ? "bg-primary/10 font-medium text-foreground"
+              : "text-muted-foreground hover:bg-secondary hover:text-foreground"
+          }`}
+        >
+          <User className="h-4 w-4" />
+          {adminName || "账户设置"}
+        </Link>
         <button
           onClick={handleLogout}
-          className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
+          className="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
         >
           <LogOut className="h-4 w-4" />
           退出登录

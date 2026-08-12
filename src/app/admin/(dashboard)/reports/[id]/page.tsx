@@ -100,16 +100,27 @@ const SYSTEM_ORDER = ["motivation", "ability", "perseverance"] as const;
 // Helpers
 // ==========================================
 
+function decodeEntities(str: string): string {
+  let result = str;
+  let prev = "";
+  while (prev !== result) {
+    prev = result;
+    result = result
+      .replace(/&amp;/g, "&")
+      .replace(/&lt;/g, "<")
+      .replace(/&gt;/g, ">")
+      .replace(/&quot;/g, '"')
+      .replace(/&#39;/g, "'");
+  }
+  return result;
+}
+
 function sanitizeHtml(raw: string): string {
   let html = raw.trim();
   // Case 1: marked converted ```html...``` into <pre><code class="language-html">...escaped...</code></pre>
   const preMatch = html.match(/<pre><code[^>]*>([\s\S]*?)<\/code><\/pre>/i);
   if (preMatch) {
-    html = preMatch[1]
-      .replace(/&lt;/g, "<")
-      .replace(/&gt;/g, ">")
-      .replace(/&amp;/g, "&")
-      .replace(/&quot;/g, '"');
+    html = decodeEntities(preMatch[1]);
   }
   // Case 2: Raw code fences in the HTML string
   const fenceMatch = html.match(/^```(?:html|HTML)?\s*\n([\s\S]*?)\n```\s*$/);
@@ -252,10 +263,12 @@ function RadarChart({ scores }: { scores: { motivation: number; ability: number;
 // ==========================================
 
 const REPORT_CSS = `
+@import url('https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@400;600;700&display=swap');
+
 .report-prose { max-width: 760px; }
-.report-prose h1 { font-size: 1.5rem; font-weight: 700; margin-top: 2.5rem; margin-bottom: 1rem; color: #111827; padding-left: 12px; border-left: 4px solid #6a9b1e; }
-.report-prose h2 { font-size: 1.25rem; font-weight: 700; margin-top: 2rem; margin-bottom: 0.75rem; color: #111827; padding-left: 12px; border-left: 4px solid #86b930; }
-.report-prose h3 { font-size: 1.1rem; font-weight: 600; margin-top: 1.5rem; margin-bottom: 0.5rem; color: #1f2937; padding-left: 10px; border-left: 3px solid #a3cc52; }
+.report-prose h1 { font-family: "Noto Serif SC", "Songti SC", "STSong", serif; font-size: 1.5rem; font-weight: 700; margin-top: 2.5rem; margin-bottom: 1rem; color: #111827; padding-left: 12px; border-left: 4px solid #6a9b1e; }
+.report-prose h2 { font-family: "Noto Serif SC", "Songti SC", "STSong", serif; font-size: 1.25rem; font-weight: 700; margin-top: 2rem; margin-bottom: 0.75rem; color: #111827; padding-left: 12px; border-left: 4px solid #86b930; }
+.report-prose h3 { font-family: "Noto Serif SC", "Songti SC", "STSong", serif; font-size: 1.1rem; font-weight: 600; margin-top: 1.5rem; margin-bottom: 0.5rem; color: #1f2937; padding-left: 10px; border-left: 3px solid #a3cc52; }
 .report-prose h4 { font-size: 1rem; font-weight: 600; margin-top: 1.2rem; margin-bottom: 0.5rem; color: #374151; }
 .report-prose p { margin-bottom: 1.2rem; line-height: 1.9; color: #374151; }
 .report-prose ul, .report-prose ol { margin-bottom: 1.2rem; padding-left: 1.5rem; }
@@ -340,6 +353,11 @@ export default function ReportReviewPage() {
         method: "POST",
       });
       if (res.ok) {
+        const result = await res.json();
+        // 后台异步触发报告生成
+        if (result.handbookId) {
+          fetch(`/api/admin/reports/${result.handbookId}/generate`, { method: "POST" }).catch(() => {});
+        }
         await fetchReport();
       } else {
         const err = await res.json();

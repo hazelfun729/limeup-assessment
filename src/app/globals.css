@@ -110,3 +110,33 @@
   opacity: 0;
   animation: heroFadeUp 0.8s ease-out forwards;
 }
+
+/* Assessment question slide-in animation */
+@keyframes questionSlideIn {
+  from {
+    opacity: 0;
+    transform: translateX(16px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+.question-slide-in {
+  animation: questionSlideIn 0.2s ease-out forwards;
+}
+
+/* Overlay fade-in animation */
+@keyframes overlayFadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.overlay-fade-in {
+  animation: overlayFadeIn 0.25s ease-out forwards;
+}

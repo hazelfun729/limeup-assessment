@@ -2,45 +2,50 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import Image from "next/image";
+
+const FONT = '"PingFang SC", -apple-system, "Helvetica Neue", sans-serif';
 
 export function SiteHeader() {
   const [loggedIn, setLoggedIn] = useState(false);
   const [checking, setChecking] = useState(true);
+  const [email, setEmail] = useState("");
 
   useEffect(() => {
     fetch("/api/auth/session")
       .then((res) => (res.ok ? res.json() : { authenticated: false }))
-      .then((data) => setLoggedIn(data.authenticated))
+      .then((data) => {
+        setLoggedIn(data.authenticated);
+        if (data.user?.email) setEmail(data.user.email);
+      })
       .catch(() => setLoggedIn(false))
       .finally(() => setChecking(false));
   }, []);
 
   return (
-    <header className="relative z-10 flex items-center justify-between px-6 py-5 md:px-12">
-      <Link href="/" className="flex items-center gap-2.5">
-        <Image
-          src="/logo.png"
-          alt="青柠伴学"
-          width={32}
-          height={32}
-          className="h-8 w-8"
+    <header className="relative z-10 flex items-center justify-between px-6 pt-4 pb-2 md:px-12">
+      <Link href="/">
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          src="/logo-banner.png"
+          alt="青柠伴学 - 自主学习力测评"
+          width={160}
+          height={47}
+          style={{ display: "block" }}
         />
-        <span className="text-sm font-medium tracking-tight text-foreground">
-          自主学习力测评
-        </span>
       </Link>
       {checking ? null : loggedIn ? (
         <Link
           href="/account"
           className="text-sm text-muted-foreground transition-colors hover:text-foreground"
+          style={{ fontFamily: FONT }}
         >
-          成长档案
+          {email}
         </Link>
       ) : (
         <Link
           href="/login"
           className="text-sm text-muted-foreground transition-colors hover:text-foreground"
+          style={{ fontFamily: FONT }}
         >
           登录
         </Link>

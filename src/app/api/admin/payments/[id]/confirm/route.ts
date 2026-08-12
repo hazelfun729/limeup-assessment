@@ -37,18 +37,38 @@ export async function POST(
       },
     });
 
-    // Create GrowthHandbook record
+    // Create GrowthHandbook record (ANALYZING — generation triggered by frontend)
     const existingHandbook = await prisma.growthHandbook.findUnique({
       where: { assessmentId: payment.assessmentId },
     });
+    let handbookId: string | null = null;
     if (!existingHandbook) {
-      await prisma.growthHandbook.create({
+      const handbook = await prisma.growthHandbook.create({
         data: {
           userId: payment.userId,
           assessmentId: payment.assessmentId,
           status: "ANALYZING",
         },
       });
+      handbookId = handbook.id;
+    } else {
+      handbookId = existingHandbook.id;
+    }
+
+    // Ensure GrowthProfile exists for later generation
+    const existingProfile = await prisma.growthProfile.findUnique({
+      where: { assessmentId: payment.assessmentId },
+    });
+    if (!existingProfile) {
+      try {
+        const { generateProfile, saveProfile } = await import("@/lib/scoring/profile");
+        const generated = await generateProfile({ assessmentId: payment.assessmentId });
+        if (generated) {
+          await saveProfile(payment.assessmentId, payment.userId, generated);
+        }
+      } catch (e) {
+        console.error("Profile generation failed during payment confirm:", e);
+      }
     }
 
     // Log operation
@@ -63,32 +83,8 @@ export async function POST(
       },
     });
 
-    // Auto-trigger report generation (async, don't block response)
-    let reportStatus = "ANALYZING";
-    try {
-      // Ensure GrowthProfile exists
-      const existingProfile = await prisma.growthProfile.findUnique({
-        where: { assessmentId: payment.assessmentId },
-      });
-      if (!existingProfile) {
-        const { generateProfile, saveProfile } = await import("@/lib/scoring/profile");
-        const generated = await generateProfile({ assessmentId: payment.assessmentId });
-        if (generated) {
-          await saveProfile(payment.assessmentId, payment.userId, generated);
-        }
-      }
-
-      // Generate handbook
-      const { generateHandbook } = await import("@/lib/report/generator");
-      await generateHandbook(payment.assessmentId);
-      reportStatus = "REVIEWING";
-    } catch (genError: unknown) {
-      const msg = genError instanceof Error ? genError.message : String(genError);
-      console.error("Auto report generation failed:", msg);
-      // Keep ANALYZING status, admin can retry manually
-    }
-
-    return NextResponse.json({ success: true, reportStatus });
+    // Generation will be triggered asynchronously by the frontend
+    return NextResponse.json({ success: true, reportStatus: "ANALYZING", handbookId });
   } catch (error) {
     console.error("Confirm payment error:", error);
     return NextResponse.json({ error: "确认失败" }, { status: 500 });

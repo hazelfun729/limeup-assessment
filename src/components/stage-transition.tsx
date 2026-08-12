@@ -1,12 +1,12 @@
 "use client";
 
-import { useEffect, useRef, useState, useCallback } from "react";
+import { useEffect, useRef, useState } from "react";
 
 // ── Stage data ──
 export const STAGE_TRANSITIONS = [
   {
     stage: 1,
-    guidance: "测评看看孩子为什么而学",
+    cta: "点击测一下孩子为什么而学",
     questions: [
       "为什么孩子越来越不想学习？",
       "为什么一催就学，不催就停？",
@@ -22,7 +22,7 @@ export const STAGE_TRANSITIONS = [
   },
   {
     stage: 2,
-    guidance: "测评看看孩子学习能力的边界在哪里",
+    cta: "点击测一下孩子学习能力的边界",
     questions: [
       "为什么孩子很努力却没效果？",
       "为什么上课听懂了，考试却不会？",
@@ -38,7 +38,7 @@ export const STAGE_TRANSITIONS = [
   },
   {
     stage: 3,
-    guidance: "测评了解孩子为什么无法持续学习",
+    cta: "测一下孩子为什么无法持续学习",
     questions: [
       "为什么知道，却做不到？",
       "为什么计划总坚持不了？",
@@ -54,270 +54,130 @@ export const STAGE_TRANSITIONS = [
   },
 ];
 
-// ── Types ──
-interface FloatingQuestion {
-  id: number;
-  text: string;
-  x: number; // percentage 0-100
-  y: number; // percentage 0-100
-  fontSize: number; // px
-  birthTime: number; // ms timestamp
-  usedIndex: number; // index into questions pool
-}
-
+// ── Props ──
 interface Props {
-  stage: number; // 1, 2, or 3
+  stage: number;
   onComplete: () => void;
 }
 
-const FADE_IN = 400;
-const STAY = 1600;
-const FADE_OUT = 400;
-const LIFETIME = FADE_IN + STAY + FADE_OUT; // 2400ms
-const MAX_VISIBLE = 5;
-const MIN_VISIBLE = 3;
-const EXIT_DURATION = 500;
-const GUIDANCE_STAY = 800;
+// ── Timing ──
+const SHOW_COUNT = 5;
+const FADE_MS = 1000;
+const STAY_MS = 2000;
+const GAP_MS = 300;
 
-// Margins (percentage from edges)
-const MARGIN_X = 12;
-const MARGIN_Y = 12;
-
-function getOpacity(elapsed: number): number {
-  if (elapsed < FADE_IN) return elapsed / FADE_IN;
-  if (elapsed < FADE_IN + STAY) return 1;
-  if (elapsed < LIFETIME) return 1 - (elapsed - FADE_IN - STAY) / FADE_OUT;
-  return 0;
-}
-
-function getDisplayOpacity(rawOpacity: number): number {
-  // Map raw opacity to display tiers: 100%, 70%, 35%
-  if (rawOpacity >= 0.9) return 1;
-  if (rawOpacity >= 0.4) return 0.7;
-  return 0.35;
-}
-
-function randomFontSize(): number {
-  return 28 + Math.random() * 4; // 28-32
-}
-
-function randomPosition(
-  existing: FloatingQuestion[],
-  isFirst: boolean
-): { x: number; y: number } {
-  const maxAttempts = 30;
-  for (let i = 0; i < maxAttempts; i++) {
-    let x: number, y: number;
-    if (isFirst) {
-      // First question: upper-center
-      x = 35 + Math.random() * 30; // 35-65%
-      y = 18 + Math.random() * 15; // 18-33%
-    } else {
-      x = MARGIN_X + Math.random() * (100 - 2 * MARGIN_X);
-      y = MARGIN_Y + Math.random() * (100 - 2 * MARGIN_Y);
-    }
-    // Check overlap with existing (minimum distance ~18%)
-    const tooClose = existing.some((q) => {
-      const dx = Math.abs(q.x - x);
-      const dy = Math.abs(q.y - y);
-      return dx < 18 && dy < 10;
-    });
-    if (!tooClose) return { x, y };
-  }
-  // Fallback: just pick any position
-  return {
-    x: MARGIN_X + Math.random() * (100 - 2 * MARGIN_X),
-    y: MARGIN_Y + Math.random() * (100 - 2 * MARGIN_Y),
-  };
-}
-
-function pickRandomQuestion(
-  pool: string[],
-  usedIndices: Set<number>
-): { text: string; index: number } {
-  const available: number[] = [];
-  for (let i = 0; i < pool.length; i++) {
-    if (!usedIndices.has(i)) available.push(i);
-  }
-  if (available.length === 0) {
-    // Reset: all used, start over
-    const idx = Math.floor(Math.random() * pool.length);
-    return { text: pool[idx], index: idx };
-  }
-  const idx = available[Math.floor(Math.random() * available.length)];
-  return { text: pool[idx], index: idx };
-}
+const FONT = '"PingFang SC", -apple-system, "Helvetica Neue", sans-serif';
 
 export function StageTransition({ stage, onComplete }: Props) {
   const data = STAGE_TRANSITIONS[stage - 1];
-  const [phase, setPhase] = useState<"questions" | "exiting" | "guidance">("questions");
-  const [questions, setQuestions] = useState<FloatingQuestion[]>([]);
-  const [exitOpacity, setExitOpacity] = useState(1);
-  const [guidanceOpacity, setGuidanceOpacity] = useState(0);
-  const [clicked, setClicked] = useState(false);
+  const pool = data.questions;
 
-  const nextId = useRef(0);
-  const usedIndices = useRef<Set<number>>(new Set());
-  const rafRef = useRef<number>(0);
-  const startTimeRef = useRef(0);
-
-  // ── Initialize first few questions with staggered birth times ──
-  useEffect(() => {
-    startTimeRef.current = performance.now();
-    const initial: FloatingQuestion[] = [];
-    for (let i = 0; i < MAX_VISIBLE; i++) {
-      const { text, index } = pickRandomQuestion(data.questions, usedIndices.current);
-      usedIndices.current.add(index);
-      const pos = randomPosition(initial, i === 0);
-      initial.push({
-        id: nextId.current++,
-        text,
-        ...pos,
-        fontSize: randomFontSize(),
-        // Stagger: first one starts now, others start earlier so they're at different lifecycle points
-        birthTime: startTimeRef.current - i * (LIFETIME / MAX_VISIBLE),
-        usedIndex: index,
-      });
+  // Shuffle once on mount
+  const orderRef = useRef<number[]>([]);
+  if (orderRef.current.length === 0) {
+    const indices = pool.map((_, i) => i);
+    for (let i = indices.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [indices[i], indices[j]] = [indices[j], indices[i]];
     }
-    setQuestions(initial);
-  }, [data.questions]);
+    orderRef.current = indices.slice(0, SHOW_COUNT);
+  }
 
-  // ── Animation loop: replace expired questions ──
+  const [idx, setIdx] = useState(0);
+  const [visible, setVisible] = useState(false);
+  const timerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
+
+  // Pure crossfade animation — loops until user clicks
   useEffect(() => {
-    if (clicked) return;
+    let cancelled = false;
 
-    let running = true;
-    const tick = () => {
-      if (!running) return;
-      const now = performance.now();
-
-      setQuestions((prev) => {
-        let changed = false;
-        const next = prev.map((q) => {
-          const elapsed = now - q.birthTime;
-          if (elapsed >= LIFETIME) {
-            changed = true;
-            usedIndices.current.delete(q.usedIndex);
-            const { text, index } = pickRandomQuestion(data.questions, usedIndices.current);
-            usedIndices.current.add(index);
-            const others = prev.filter((p) => p.id !== q.id);
-            const pos = randomPosition(others, false);
-            return {
-              id: nextId.current++,
-              text,
-              ...pos,
-              fontSize: randomFontSize(),
-              birthTime: now,
-              usedIndex: index,
-            };
-          }
-          return q;
-        });
-        return changed ? next : prev;
-      });
-
-      rafRef.current = requestAnimationFrame(tick);
-    };
-    rafRef.current = requestAnimationFrame(tick);
-    return () => {
-      running = false;
-      cancelAnimationFrame(rafRef.current);
-    };
-  }, [clicked, data.questions]);
-
-  // ── Click handler ──
-  const handleClick = useCallback(() => {
-    if (clicked) return;
-    setClicked(true);
-    cancelAnimationFrame(rafRef.current);
-    setPhase("exiting");
-
-    // Fade out all questions over 500ms
-    const exitStart = performance.now();
-    const exitTick = () => {
-      const elapsed = performance.now() - exitStart;
-      const progress = Math.min(elapsed / EXIT_DURATION, 1);
-      setExitOpacity(1 - progress);
-      if (progress < 1) {
-        requestAnimationFrame(exitTick);
-      } else {
-        // Show guidance text
-        setPhase("guidance");
-        setGuidanceOpacity(0);
-        const guideStart = performance.now();
-        const guideTick = () => {
-          const ge = performance.now() - guideStart;
-          const fadeIn = Math.min(ge / 400, 1);
-          setGuidanceOpacity(fadeIn);
-          if (ge < 400 + GUIDANCE_STAY) {
-            requestAnimationFrame(guideTick);
-          } else {
-            onComplete();
-          }
-        };
-        requestAnimationFrame(guideTick);
+    const showNext = (i: number) => {
+      if (cancelled) return;
+      if (i >= SHOW_COUNT) {
+        setVisible(false);
+        timerRef.current = setTimeout(() => {
+          if (!cancelled) showNext(0);
+        }, FADE_MS + GAP_MS);
+        return;
       }
+      setIdx(i);
+      setVisible(true);
+      timerRef.current = setTimeout(() => {
+        if (cancelled) return;
+        setVisible(false);
+        timerRef.current = setTimeout(() => {
+          if (!cancelled) showNext(i + 1);
+        }, FADE_MS + GAP_MS);
+      }, STAY_MS);
     };
-    requestAnimationFrame(exitTick);
-  }, [clicked, onComplete]);
 
-  // ── Render ──
-  const now = performance.now();
+    timerRef.current = setTimeout(() => showNext(0), 400);
+
+    return () => {
+      cancelled = true;
+      if (timerRef.current) clearTimeout(timerRef.current);
+    };
+  }, []);
+
+  const currentText = pool[orderRef.current[idx]] || "";
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center"
-      style={{ background: "#FAFAF9", cursor: "default" }}
-      onClick={handleClick}
+      className="fixed inset-0 z-50 flex cursor-pointer items-center justify-center"
+      style={{ background: "#FAFAF9" }}
+      onClick={onComplete}
     >
-      {/* Floating questions */}
-      {phase !== "guidance" &&
-        questions.map((q) => {
-          const elapsed = now - q.birthTime;
-          const raw = getOpacity(Math.max(0, elapsed));
-          const opacity = phase === "exiting" ? exitOpacity : getDisplayOpacity(raw);
-          if (opacity <= 0) return null;
-          return (
-            <span
-              key={q.id}
-              className="pointer-events-none absolute select-none"
-              style={{
-                left: `${q.x}%`,
-                top: `${q.y}%`,
-                transform: "translate(-50%, -50%)",
-                fontSize: `${q.fontSize}px`,
-                color: "#374151",
-                opacity,
-                transition: phase === "exiting" ? `opacity ${EXIT_DURATION}ms ease` : "opacity 200ms ease",
-                fontWeight: 400,
-                letterSpacing: "-0.01em",
-                lineHeight: 1.5,
-                whiteSpace: "nowrap",
-              }}
-            >
-              {q.text}
-            </span>
-          );
-        })}
-
-      {/* Guidance text */}
-      {phase === "guidance" && (
+      {/* Question + CTA as one centered block */}
+      <div className="flex flex-col items-center" style={{ maxWidth: "72vw" }}>
+        {/* Floating question — pure opacity crossfade */}
         <p
           className="pointer-events-none select-none text-center"
           style={{
-            fontSize: "22px",
-            fontWeight: 500,
-            color: "#111827",
-            opacity: guidanceOpacity,
-            transition: "opacity 400ms ease",
-            letterSpacing: "-0.01em",
-            lineHeight: 1.6,
-            maxWidth: "80vw",
+            fontFamily: FONT,
+            fontSize: "19px",
+            fontWeight: 300,
+            letterSpacing: "0.02em",
+            lineHeight: 1.8,
+            color: "#6b7280",
+            opacity: visible ? 1 : 0,
+            transition: `opacity ${FADE_MS}ms cubic-bezier(0.25, 0.1, 0.25, 1)`,
           }}
         >
-          {data.guidance}
+          {currentText}
         </p>
-      )}
+
+        {/* CTA hint — visual only, full screen is clickable */}
+        <div
+          className="mt-8 flex items-center gap-2.5"
+          style={{ fontFamily: FONT }}
+        >
+          <svg
+            width="14"
+            height="14"
+            viewBox="0 0 24 24"
+            fill="none"
+            style={{ flexShrink: 0 }}
+          >
+            <path
+              d="M5 3L19 12L12 13L9 20L5 3Z"
+              fill="oklch(0.87 0.16 110)"
+              stroke="oklch(0.87 0.16 110)"
+              strokeWidth="1"
+              strokeLinejoin="round"
+            />
+          </svg>
+          <span
+            style={{
+              fontSize: "14px",
+              fontWeight: 400,
+              color: "oklch(0.87 0.16 110)",
+              letterSpacing: "0.01em",
+            }}
+          >
+            {data.cta}
+          </span>
+        </div>
+      </div>
     </div>
   );
 }
