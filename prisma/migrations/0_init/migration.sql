@@ -1,5 +1,3 @@
-Loaded Prisma config from prisma.config.ts.
-
 -- CreateSchema
 CREATE SCHEMA IF NOT EXISTS "public";
 
@@ -489,4 +487,3 @@ ALTER TABLE "CRMContact" ADD CONSTRAINT "CRMContact_userId_fkey" FOREIGN KEY ("u
 
 -- AddForeignKey
 ALTER TABLE "CRMFollowUp" ADD CONSTRAINT "CRMFollowUp_contactId_fkey" FOREIGN KEY ("contactId") REFERENCES "CRMContact"("id") ON DELETE CASCADE ON UPDATE CASCADE;
-

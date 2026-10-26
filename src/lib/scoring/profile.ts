@@ -7,7 +7,6 @@
 import { prisma } from "@/lib/prisma";
 import {
   calculateScores,
-  calculateAnswerScore,
   SYSTEMS,
   DIMENSIONS,
   MODULES,
@@ -54,7 +53,7 @@ export async function generateProfile(
       question: {
         select: {
           order: true,
-          isReverseScored: true,
+          scoreValues: true,
         },
       },
     },
@@ -68,7 +67,7 @@ export async function generateProfile(
   const answerRecords = answers.map((a) => ({
     questionOrder: a.question.order,
     answer: a.answer,
-    score: calculateAnswerScore(a.answer, a.question.isReverseScored),
+    score: (a.question.scoreValues as Record<string, number>)[a.answer] ?? 0,
   }));
 
   // 3. Run scoring engine
@@ -108,7 +107,8 @@ export async function generateProfile(
     { score: number; level: string; name: string }
   > = {};
   for (const dim of DIMENSIONS) {
-    const score = scoring.dimensionScores[dim.code] ?? 0;
+    const score = scoring.dimensionScores[dim.code];
+    if (score === undefined) continue;
     dimensionScoresFormatted[dim.code] = {
       score,
       level: getScoreLevel(score),
@@ -121,7 +121,8 @@ export async function generateProfile(
     { score: number; level: string; name: string }
   > = {};
   for (const mod of MODULES) {
-    const score = scoring.moduleScores[mod.code] ?? 0;
+    const score = scoring.moduleScores[mod.code];
+    if (score === undefined) continue;
     moduleScoresFormatted[mod.code] = {
       score,
       level: getScoreLevel(score),

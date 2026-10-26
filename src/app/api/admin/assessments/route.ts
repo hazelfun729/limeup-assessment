@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { cookies } from "next/headers";
+import { getAdminSession } from "@/lib/admin/auth";
 
 /**
  * GET /api/admin/assessments
@@ -8,8 +8,7 @@ import { cookies } from "next/headers";
  */
 export async function GET(request: NextRequest) {
   try {
-    const cookieStore = await cookies();
-    if (!cookieStore.get("admin_session")?.value) {
+    if (!(await getAdminSession())?.id) {
       return NextResponse.json({ error: "未登录" }, { status: 401 });
     }
 

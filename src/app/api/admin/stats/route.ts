@@ -1,15 +1,14 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { cookies } from "next/headers";
+import { getAdminSession } from "@/lib/admin/auth";
 
 /**
  * GET /api/admin/stats
  * Overall platform statistics: totals, trends, conversion funnel
  */
-export async function GET(request: NextRequest) {
+export async function GET() {
   try {
-    const cookieStore = await cookies();
-    if (!cookieStore.get("admin_session")?.value) {
+    if (!(await getAdminSession())?.id) {
       return NextResponse.json({ error: "未登录" }, { status: 401 });
     }
 
@@ -26,7 +25,6 @@ export async function GET(request: NextRequest) {
     const [
       totalAssessments,
       totalUsers,
-      totalPayments,
       totalRevenue,
       completedAssessments,
       inProgressAssessments,
@@ -48,7 +46,6 @@ export async function GET(request: NextRequest) {
     ] = await Promise.all([
       prisma.assessment.count(),
       prisma.user.count(),
-      prisma.payment.count(),
       prisma.payment.aggregate({
         _sum: { amount: true },
         where: { status: "CONFIRMED" },

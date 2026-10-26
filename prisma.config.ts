@@ -3,12 +3,17 @@
 import "dotenv/config";
 import { defineConfig } from "prisma/config";
 
+const migrationUrl = new URL(process.env["DIRECT_URL"] || process.env["DATABASE_URL"] || "postgresql://localhost/postgres");
+if (migrationUrl.hostname.endsWith(".pooler.supabase.com") && migrationUrl.port === "6543") {
+  migrationUrl.port = "5432";
+}
+
 export default defineConfig({
   schema: "prisma/schema.prisma",
   migrations: {
     path: "prisma/migrations",
   },
   datasource: {
-    url: process.env["DATABASE_URL"],
+    url: migrationUrl.toString(),
   },
 });

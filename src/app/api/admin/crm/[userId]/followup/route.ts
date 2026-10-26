@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { cookies } from "next/headers";
+import { getAdminSession } from "@/lib/admin/auth";
 
 /**
  * POST /api/admin/crm/[userId]/followup
@@ -11,8 +11,7 @@ export async function POST(
   { params }: { params: Promise<{ userId: string }> }
 ) {
   try {
-    const cookieStore = await cookies();
-    const adminId = cookieStore.get("admin_session")?.value;
+    const adminId = (await getAdminSession())?.id;
     if (!adminId) {
       return NextResponse.json({ error: "未登录" }, { status: 401 });
     }

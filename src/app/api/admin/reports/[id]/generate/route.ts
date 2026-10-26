@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { cookies } from "next/headers";
-import { generateHandbook } from "@/lib/report/generator";
+import { getAdminSession } from "@/lib/admin/auth";
+import { ReportBusyError } from "@/lib/report/pipeline";
+import { dispatchReportGeneration, ReportDispatchUncertainError } from "@/lib/report/dispatch";
 
 /**
  * POST /api/admin/reports/[id]/generate
@@ -12,9 +13,9 @@ export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+
   try {
-    const cookieStore = await cookies();
-    const adminId = cookieStore.get("admin_session")?.value;
+    const adminId = (await getAdminSession())?.id;
     if (!adminId) {
       return NextResponse.json({ error: "未登录" }, { status: 401 });
     }
@@ -59,23 +60,9 @@ export async function POST(
       return NextResponse.json({ error: "用户未注册，无法生成报告" }, { status: 400 });
     }
 
-    // Ensure GrowthProfile exists (needed for report generation)
-    const existingProfile = await prisma.growthProfile.findUnique({
-      where: { assessmentId },
-    });
-    if (!existingProfile) {
-      // Generate profile on the fly
-      const { generateProfile, saveProfile } = await import("@/lib/scoring/profile");
-      const generated = await generateProfile({ assessmentId });
-      if (generated) {
-        await saveProfile(assessmentId, assessment.userId, generated);
-      } else {
-        return NextResponse.json({ error: "无法生成成长画像，请确保已完成全部题目" }, { status: 400 });
-      }
-    }
 
     // Generate handbook
-    const result = await generateHandbook(assessmentId);
+    const result = await dispatchReportGeneration(assessmentId, request.url, true);
 
     // Log operation
     const admin = await prisma.admin.findUnique({ where: { id: adminId } });
@@ -84,19 +71,26 @@ export async function POST(
         adminId,
         adminName: admin?.username || "unknown",
         action: "generate_report",
-        target: result.handbookId,
-        details: `生成报告: assessment=${assessmentId}`,
+        target: result.handbookId || assessmentId,
+        details: `生成报告: assessment=${assessmentId}, result=${result.outcome}`,
       },
     });
 
     return NextResponse.json({
       success: true,
       handbookId: result.handbookId,
-      status: "REVIEWING",
+      status: result.status,
+      queued: result.queued,
+      outcome: result.outcome,
     });
   } catch (error: unknown) {
+    if (error instanceof ReportDispatchUncertainError) {
+      return NextResponse.json({ success: true, queued: true, status: "ANALYZING", warning: error.message }, { status: 202 });
+    }
+    if (error instanceof ReportBusyError) return NextResponse.json({error:error.message},{status:409});
     const msg = error instanceof Error ? error.message : String(error);
     console.error("Report generation error:", msg);
+
     return NextResponse.json({ error: `报告生成失败: ${msg}` }, { status: 500 });
   }
 }

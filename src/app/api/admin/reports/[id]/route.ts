@@ -1,6 +1,32 @@
+import { cleanReportHtml } from "@/lib/security/report-html";
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { cookies } from "next/headers";
+import { getAdminSession } from "@/lib/admin/auth";
+import { reportDeliveryId } from "@/lib/report/send";
+import { getReportJob, isStaleReportJob } from "@/lib/report/job";
+
+const answerRecordsQuery = {
+  include: {
+    question: {
+      include: { module: { include: { dimension: { include: { system: true } } } } },
+    },
+  },
+  orderBy: { answeredAt: "asc" },
+} as const;
+
+const userQuery = { select: { email: true, phone: true, emailVerified: true } } as const;
+const handbookQuery = {
+  user: userQuery,
+  assessment: {
+    include: { answerRecords: answerRecordsQuery, growthProfile: true, payment: true },
+  },
+} as const;
+const assessmentQuery = {
+  user: userQuery,
+  answerRecords: answerRecordsQuery,
+  growthProfile: true,
+  payment: true,
+} as const;
 
 /**
  * GET /api/admin/reports/[id]
@@ -11,8 +37,7 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const cookieStore = await cookies();
-    if (!cookieStore.get("admin_session")?.value) {
+    if (!(await getAdminSession())?.id) {
       return NextResponse.json({ error: "未登录" }, { status: 401 });
     }
 
@@ -21,46 +46,14 @@ export async function GET(
     // Try lookup by handbook.id first, then by assessmentId
     let handbook = await prisma.growthHandbook.findUnique({
       where: { id },
-      include: {
-        user: { select: { email: true, phone: true } },
-        assessment: {
-          include: {
-            answerRecords: {
-              include: {
-                question: {
-                  include: { module: { include: { dimension: { include: { system: true } } } } },
-                },
-              },
-              orderBy: { answeredAt: "asc" },
-            },
-            growthProfile: true,
-            payment: true,
-          },
-        },
-      },
+      include: handbookQuery,
     });
 
     // If not found by handbook id, try by assessmentId
     if (!handbook) {
       handbook = await prisma.growthHandbook.findUnique({
         where: { assessmentId: id },
-        include: {
-          user: { select: { email: true, phone: true } },
-          assessment: {
-            include: {
-              answerRecords: {
-                include: {
-                  question: {
-                    include: { module: { include: { dimension: { include: { system: true } } } } },
-                  },
-                },
-                orderBy: { answeredAt: "asc" },
-              },
-              growthProfile: true,
-              payment: true,
-            },
-          },
-        },
+        include: handbookQuery,
       });
     }
 
@@ -68,19 +61,7 @@ export async function GET(
     if (!handbook) {
       const assessment = await prisma.assessment.findUnique({
         where: { id },
-        include: {
-          user: { select: { email: true, phone: true } },
-          answerRecords: {
-            include: {
-              question: {
-                include: { module: { include: { dimension: { include: { system: true } } } } },
-              },
-            },
-            orderBy: { answeredAt: "asc" },
-          },
-          growthProfile: true,
-          payment: true,
-        },
+        include: assessmentQuery,
       });
 
       if (assessment && assessment.payment && assessment.payment.status === "PENDING") {
@@ -137,14 +118,23 @@ export async function GET(
       return NextResponse.json({ error: "报告不存在" }, { status: 404 });
     }
 
+    const delivery = await prisma.delivery.findUnique({
+      where: { id: reportDeliveryId(handbook.id, handbook.version) },
+      select: { status: true, error: true, sentAt: true, to: true },
+    });
+    const job = handbook.status === "ANALYZING" ? await getReportJob(handbook.assessmentId) : null;
+    const jobIssue = job?.state === "FAILED" ? "任务失败，请核查生成记录后重试"
+      : job && isStaleReportJob(job) ? "任务超过 20 分钟未完成，请核查生成记录后重试" : null;
     return NextResponse.json({
+      delivery,
+      jobIssue,
       handbook: {
         id: handbook.id,
         assessmentId: handbook.assessmentId,
         status: handbook.status,
         content: handbook.content,
-        contentHtml: handbook.contentHtml,
-        aiRawOutput: handbook.aiRawOutput,
+        contentHtml: cleanReportHtml(handbook.contentHtml || handbook.aiRawOutput),
+        aiRawOutput: null,
         reviewedBy: handbook.reviewedBy,
         reviewNotes: handbook.reviewNotes,
         reviewedAt: handbook.reviewedAt,
@@ -156,6 +146,7 @@ export async function GET(
       user: {
         email: handbook.user.email,
         phone: handbook.user.phone,
+        emailVerified: handbook.user.emailVerified,
       },
       assessment: {
         studentName: handbook.assessment.studentName,
@@ -215,15 +206,22 @@ export async function PUT(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const cookieStore = await cookies();
-    const adminId = cookieStore.get("admin_session")?.value;
+    const adminId = (await getAdminSession())?.id;
     if (!adminId) {
       return NextResponse.json({ error: "未登录" }, { status: 401 });
     }
 
     const { id } = await params;
     const body = await request.json();
-    const { content, contentHtml, status, reviewNotes, sentTo } = body;
+    const { content, contentHtml, status, reviewNotes } = body;
+    if (status !== undefined && !["ANALYZING", "REVIEWING", "NEEDS_MANUAL_REVIEW"].includes(status)) {
+      return NextResponse.json({ error: "发送状态只能由邮件投递结果更新" }, { status: 400 });
+    }
+    const current = await prisma.growthHandbook.findUnique({ where: { id }, select: { status: true } });
+    if (!current) return NextResponse.json({ error: "报告不存在" }, { status: 404 });
+    if (["SENDING", "SENT"].includes(current.status) && (status !== undefined || content !== undefined || contentHtml !== undefined)) {
+      return NextResponse.json({ error: "发送中的报告不能直接修改，请核实投递记录" }, { status: 409 });
+    }
 
     const updateData: Record<string, unknown> = {};
     if (content !== undefined) updateData.content = content;
@@ -233,10 +231,6 @@ export async function PUT(
       if (status === "REVIEWING") {
         updateData.reviewedBy = adminId;
         updateData.reviewedAt = new Date();
-      }
-      if (status === "SENT") {
-        updateData.sentAt = new Date();
-        updateData.sentTo = sentTo || null;
       }
     }
     if (reviewNotes !== undefined) updateData.reviewNotes = reviewNotes;

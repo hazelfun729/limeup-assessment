@@ -1,12 +1,19 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import Image from "next/image";
 import { Mail, Lock, ArrowLeft } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+
+function loginDestination() {
+  const target = new URLSearchParams(window.location.search).get("redirect");
+  return target && target.startsWith("/") && !target.startsWith("//") && !target.startsWith("/login") && !target.includes("\\")
+    ? target
+    : "/account";
+}
 
 export default function LoginPage() {
   const router = useRouter();
@@ -17,6 +24,17 @@ export default function LoginPage() {
   const [cooldown, setCooldown] = useState(0);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/auth/session", { cache: "no-store" })
+      .then((res) => res.ok ? res.json() : null)
+      .then((data) => {
+        if (!cancelled && data?.authenticated) router.replace(loginDestination());
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [router]);
 
   const handleSendCode = async () => {
     if (!email || cooldown > 0) return;
@@ -73,7 +91,7 @@ export default function LoginPage() {
         return;
       }
 
-      router.push("/account");
+      router.replace(loginDestination());
     } catch {
       setError("网络错误，请稍后重试");
     } finally {
@@ -98,13 +116,13 @@ export default function LoginPage() {
       <div className="flex flex-1 items-center justify-center px-6">
         <div className="w-full max-w-sm space-y-8">
           <div className="text-center">
-            <div className="mx-auto mb-6 flex h-12 w-12 items-center justify-center">
+            <div className="mx-auto mb-6 flex w-[170px] items-center justify-center">
               <Image
-                src="/logo.png"
-                alt="青柠伴学"
-                width={40}
-                height={40}
-                className="h-10 w-10"
+                src="/logo-banner.png"
+                alt="青柠伴学 · 自主学习力测评"
+                width={878}
+                height={255}
+                className="h-auto w-full"
               />
             </div>
             <h1 className="text-2xl font-semibold text-foreground">
@@ -164,7 +182,7 @@ export default function LoginPage() {
           </div>
 
           <p className="text-center text-xs text-muted-foreground">
-            还没有账号？完成测评后会自动注册
+            还没有账号？完成测评后会自动进入注册流程
           </p>
         </div>
       </div>

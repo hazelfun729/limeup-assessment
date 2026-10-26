@@ -72,17 +72,6 @@ export function StageTransition({ stage, onComplete }: Props) {
   const data = STAGE_TRANSITIONS[stage - 1];
   const pool = data.questions;
 
-  // Shuffle once on mount
-  const orderRef = useRef<number[]>([]);
-  if (orderRef.current.length === 0) {
-    const indices = pool.map((_, i) => i);
-    for (let i = indices.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1));
-      [indices[i], indices[j]] = [indices[j], indices[i]];
-    }
-    orderRef.current = indices.slice(0, SHOW_COUNT);
-  }
-
   const [idx, setIdx] = useState(0);
   const [visible, setVisible] = useState(false);
   const timerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
@@ -119,7 +108,7 @@ export function StageTransition({ stage, onComplete }: Props) {
     };
   }, []);
 
-  const currentText = pool[orderRef.current[idx]] || "";
+  const currentText = pool[idx] || "";
 
   return (
     <div

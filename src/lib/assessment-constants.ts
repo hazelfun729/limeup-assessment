@@ -31,10 +31,10 @@ export const QUESTIONS_PER_STAGE = [20, 24, 22]; // Stage 1: 20, Stage 2: 24, St
 
 // 5 answer options per XLSX (PRD §4)
 export const ANSWER_OPTIONS = [
-  { value: "ALWAYS", label: "总是" },
-  { value: "OFTEN", label: "经常" },
-  { value: "SOMETIMES", label: "偶尔" },
-  { value: "RARELY", label: "极少" },
+  { value: "ALWAYS", label: "非常符合" },
+  { value: "OFTEN", label: "比较符合" },
+  { value: "SOMETIMES", label: "比较不符合" },
+  { value: "RARELY", label: "完全不符合" },
   { value: "UNKNOWN", label: "不了解" },
 ] as const;
 

@@ -1,58 +1,24 @@
 import { PrismaClient } from "@/generated/prisma/client";
+import { PrismaPg } from "@prisma/adapter-pg";
 
 const globalForPrisma = globalThis as unknown as {
-  prisma: PrismaClient | undefined;
+  prisma?: PrismaClient;
+  databaseUrl?: string;
 };
-
-async function createPrismaClient(): Promise<PrismaClient> {
-  const databaseUrl = process.env.DATABASE_URL || "";
-
-  if (databaseUrl.startsWith("postgres") || databaseUrl.startsWith("postgresql")) {
-    // ── Production: PostgreSQL (Neon / Vercel) ──
-    const { PrismaPg } = await import("@prisma/adapter-pg");
-    const adapter = new PrismaPg({ connectionString: databaseUrl });
-    return new PrismaClient({ adapter });
-  } else {
-    // ── Development: SQLite (local) ──
-    const path = await import("path");
-    const { PrismaBetterSqlite3 } = await import("@prisma/adapter-better-sqlite3");
-    const dbPath = path.resolve(process.cwd(), "prisma/dev.db");
-    const adapter = new PrismaBetterSqlite3({ url: `file:${dbPath}` });
-    return new PrismaClient({ adapter });
-  }
+const databaseUrl = process.env.DATABASE_URL;
+const canReuse = globalForPrisma.prisma && globalForPrisma.databaseUrl === databaseUrl;
+if (!canReuse && globalForPrisma.prisma) {
+  void globalForPrisma.prisma.$disconnect();
 }
-
-let _clientPromise: Promise<PrismaClient> | null = null;
-
-function getClientPromise(): Promise<PrismaClient> {
-  if (globalForPrisma.prisma) return Promise.resolve(globalForPrisma.prisma);
-  if (!_clientPromise) {
-    _clientPromise = createPrismaClient().then((c) => {
-      if (process.env.NODE_ENV !== "production") globalForPrisma.prisma = c;
-      return c;
-    });
-  }
-  return _clientPromise;
-}
-
-// Lazy proxy: prisma.user.findUnique(...) works transparently
-// prisma.user → inner Proxy → method call resolves client first
-export const prisma = new Proxy({} as PrismaClient, {
-  get(_target, prop) {
-    if (typeof prop === "symbol") return undefined;
-    return new Proxy({} as Record<string, unknown>, {
-      get(_innerTarget, method) {
-        if (typeof method === "symbol") return undefined;
-        return (...args: unknown[]) =>
-          getClientPromise().then(
-            (client) =>
-              (
-                (client as unknown as Record<string, Record<string, (...a: unknown[]) => unknown>>)[
-                  prop as string
-                ][method as string]
-              )(...args)
-          );
-      },
-    });
-  },
+// Construction is lazy with respect to connections, so builds do not query the database.
+export const prisma = canReuse ? globalForPrisma.prisma! : new PrismaClient({
+  adapter: new PrismaPg({
+    connectionString: databaseUrl,
+    connectionTimeoutMillis: 8000,
+    max: 4,
+  }),
 });
+if (process.env.NODE_ENV !== "production") {
+  globalForPrisma.prisma = prisma;
+  globalForPrisma.databaseUrl = databaseUrl;
+}

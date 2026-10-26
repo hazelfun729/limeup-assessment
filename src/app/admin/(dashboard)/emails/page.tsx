@@ -49,7 +49,8 @@ export default function EmailsPage() {
   }, [statusFilter]);
 
   useEffect(() => {
-    fetchEmails();
+    const timer = setTimeout(() => { fetchEmails(); }, 0);
+    return () => clearTimeout(timer);
   }, [fetchEmails]);
 
   return (

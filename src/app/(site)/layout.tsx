@@ -1,4 +1,5 @@
 import { SiteHeader } from "@/components/site-header";
+import { Suspense } from "react";
 
 export default function SiteLayout({
   children,
@@ -7,7 +8,7 @@ export default function SiteLayout({
 }) {
   return (
     <div className="flex min-h-dvh flex-col">
-      <SiteHeader />
+      <Suspense fallback={null}><SiteHeader /></Suspense>
       {children}
     </div>
   );

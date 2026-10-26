@@ -1,3 +1,5 @@
+import { rateLimit } from "@/lib/security/rate-limit";
+import { createSession, revokeSession } from "@/lib/security/session";
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import bcrypt from "bcryptjs";
@@ -5,13 +7,20 @@ import bcrypt from "bcryptjs";
 const SESSION_COOKIE = "admin_session";
 const SESSION_MAX_AGE = 60 * 60 * 24 * 7;
 
+function isDatabaseConnectionError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return /tenant(?: or |\/)user|ENOTFOUND|EHOSTUNREACH|ENETUNREACH|ETIMEDOUT|timeout|Can't reach database server|P1001/i.test(message);
+}
+
 /**
  * POST /api/admin/login
  * Admin login with username/email + password
  */
 export async function POST(request: NextRequest) {
   try {
-    const { login, password } = await request.json();
+    const body = await request.json();
+    const login = body.login || body.email || body.username;
+    const password = body.password;
 
     if (!login || !password) {
       return NextResponse.json(
@@ -19,6 +28,9 @@ export async function POST(request: NextRequest) {
         { status: 400 }
       );
     }
+
+    const limited = await rateLimit("verify", String(login), 10, 300);
+    if (limited) return limited;
 
     // Find admin by username or email
     const admin = await prisma.admin.findFirst({
@@ -60,7 +72,7 @@ export async function POST(request: NextRequest) {
       },
     });
 
-    // Set session cookie (using admin.id as simple token for V1)
+    // Issue an opaque, revocable session after authentication.
     const response = NextResponse.json({
       success: true,
       admin: {
@@ -70,7 +82,7 @@ export async function POST(request: NextRequest) {
       },
     });
 
-    response.cookies.set(SESSION_COOKIE, admin.id, {
+    response.cookies.set(SESSION_COOKIE, await createSession("ADMIN", admin.id, SESSION_MAX_AGE), {
       httpOnly: true,
       secure: process.env.NODE_ENV === "production",
       sameSite: "lax",
@@ -81,6 +93,12 @@ export async function POST(request: NextRequest) {
     return response;
   } catch (error) {
     console.error("Admin login error:", error);
+    if (isDatabaseConnectionError(error)) {
+      return NextResponse.json(
+        { error: "数据库暂不可用，请检查 Supabase 项目状态后重试" },
+        { status: 503, headers: { "Retry-After": "30" } }
+      );
+    }
     return NextResponse.json(
       { error: "登录失败，请稍后重试" },
       { status: 500 }
@@ -93,6 +111,7 @@ export async function POST(request: NextRequest) {
  * Logout
  */
 export async function DELETE() {
+  await revokeSession(SESSION_COOKIE);
   const response = NextResponse.json({ success: true });
   response.cookies.set(SESSION_COOKIE, "", { maxAge: 0, path: "/" });
   return response;

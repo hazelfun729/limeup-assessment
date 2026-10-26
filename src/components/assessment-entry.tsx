@@ -24,8 +24,9 @@ export function AssessmentEntry() {
 
       try {
         const data = JSON.parse(localStorage.getItem(key) || "{}");
+        if (!data.updatedAt || Date.now() - data.updatedAt > STALE_THRESHOLD_MS) continue;
         const answerCount = data.answers ? Object.keys(data.answers).length : 0;
-        if (answerCount === 0) continue;
+        if (answerCount === 0 || answerCount >= 66) continue;
 
         const id = key.replace(STORAGE_KEY_PREFIX, "");
         if (!best || answerCount > best.answeredCount) {
@@ -36,7 +37,8 @@ export function AssessmentEntry() {
       }
     }
 
-    setSaved(best);
+    const timer = setTimeout(() => setSaved(best), 0);
+    return () => clearTimeout(timer);
   }, []);
 
   const progress = saved
@@ -46,6 +48,7 @@ export function AssessmentEntry() {
   return (
     <div className="hero-fade-up mt-10 flex flex-col items-center gap-3" style={{ animationDelay: "0.3s" }}>
       <Link
+        onClick={() => sessionStorage.removeItem("assessment_start_key")}
         href="/assessment"
         className="inline-flex h-12 items-center justify-center rounded-full bg-primary px-8 text-base font-medium text-primary-foreground shadow-sm transition-all hover:shadow-md hover:brightness-95 active:scale-[0.98]"
       >

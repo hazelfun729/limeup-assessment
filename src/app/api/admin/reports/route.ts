@@ -1,69 +1,63 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { cookies } from "next/headers";
+import { isStaleReportJob, parseReportJob } from "@/lib/report/job";
+import { getAdminSession } from "@/lib/admin/auth";
 
 export async function GET(request: NextRequest) {
   try {
-    const cookieStore = await cookies();
-    if (!cookieStore.get("admin_session")?.value) {
+    if (!(await getAdminSession())?.id) {
       return NextResponse.json({ error: "未登录" }, { status: 401 });
     }
 
     const { searchParams } = new URL(request.url);
-    const page = parseInt(searchParams.get("page") || "1");
-    const pageSize = parseInt(searchParams.get("pageSize") || "20");
+    const page = Math.max(1, Number.parseInt(searchParams.get("page") || "1", 10) || 1);
+    const pageSize = Math.min(100, Math.max(1, Number.parseInt(searchParams.get("pageSize") || "20", 10) || 20));
     const status = searchParams.get("status") || "";
 
     const skip = (page - 1) * pageSize;
 
-    // Fetch GrowthHandbook records
-    const handbookWhere: Record<string, unknown> = {};
-    if (status && status !== "AWAITING_PAYMENT") {
-      handbookWhere.status = status;
-    }
-
-    const shouldFetchHandbooks = status === "" || (status !== "AWAITING_PAYMENT");
-    const shouldFetchPayments = status === "" || status === "AWAITING_PAYMENT";
-
-    const [handbooks, handbookTotal, payments, paymentTotal] = await Promise.all([
-      shouldFetchHandbooks
+    const handbookWhere = status && status !== "AWAITING_PAYMENT"
+      ? { status: status as "ANALYZING" | "REVIEWING" | "SENDING" | "SENT" | "FAILED" | "NEEDS_MANUAL_REVIEW" }
+      : {};
+    const paymentWhere = { status: "PENDING" as const, assessment: { handbook: { is: null } } };
+    const includeHandbooks = status !== "AWAITING_PAYMENT";
+    const includePayments = status === "" || status === "AWAITING_PAYMENT";
+    // For a mixed page, at most the first skip + pageSize records of either
+    // source can appear on that page. Avoid loading full reports from Supabase.
+    const mixedLimit = skip + pageSize;
+    const [handbooks, handbookCount, payments, paymentCount] = await Promise.all([
+      includeHandbooks
         ? prisma.growthHandbook.findMany({
             where: handbookWhere,
             orderBy: { createdAt: "desc" },
-            include: {
+            skip: includePayments ? 0 : skip,
+            take: includePayments ? mixedLimit : pageSize,
+            select: {
+              id: true, assessmentId: true, status: true, reviewedBy: true,
+              reviewedAt: true, sentAt: true, createdAt: true,
               user: { select: { email: true } },
-              assessment: {
-                include: {
-                  growthProfile: {
-                    select: { learningModeName: true, growthFocus: true },
-                  },
-                },
-              },
+              assessment: { select: {
+                studentName: true, parentName: true, grade: true,
+                growthProfile: { select: { learningModeName: true, growthFocus: true } },
+              } },
             },
           })
         : Promise.resolve([]),
-      shouldFetchHandbooks
-        ? prisma.growthHandbook.count({ where: handbookWhere })
-        : Promise.resolve(0),
-      shouldFetchPayments
+      includeHandbooks ? prisma.growthHandbook.count({ where: handbookWhere }) : Promise.resolve(0),
+      includePayments
         ? prisma.payment.findMany({
-            where: { status: "PENDING" },
+            where: paymentWhere,
             orderBy: { createdAt: "desc" },
-            include: {
+            skip: includeHandbooks ? 0 : skip,
+            take: includeHandbooks ? mixedLimit : pageSize,
+            select: {
+              id: true, assessmentId: true, createdAt: true,
               user: { select: { email: true } },
-              assessment: {
-                select: {
-                  studentName: true,
-                  parentName: true,
-                  grade: true,
-                },
-              },
+              assessment: { select: { studentName: true, parentName: true, grade: true } },
             },
           })
         : Promise.resolve([]),
-      shouldFetchPayments
-        ? prisma.payment.count({ where: { status: "PENDING" } })
-        : Promise.resolve(0),
+      includePayments ? prisma.payment.count({ where: paymentWhere }) : Promise.resolve(0),
     ]);
 
     // Build unified report list
@@ -108,10 +102,6 @@ export async function GET(request: NextRequest) {
 
     // Add pending payment entries (virtual "AWAITING_PAYMENT" entries)
     for (const p of payments) {
-      // Skip if this assessment already has a GrowthHandbook
-      const existingHandbook = handbooks.find((h) => h.assessmentId === p.assessmentId);
-      if (existingHandbook) continue;
-
       items.push({
         id: `pending_${p.id}`,
         assessmentId: p.assessmentId,
@@ -134,11 +124,28 @@ export async function GET(request: NextRequest) {
     items.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
 
     // Paginate
-    const total = items.length;
-    const paginatedItems = items.slice(skip, skip + pageSize);
+    const total = handbookCount + paymentCount;
+    const paginatedItems = includeHandbooks && includePayments
+      ? items.slice(skip, skip + pageSize)
+      : items;
+    const analyzingIds = paginatedItems.filter((item) => item.status === "ANALYZING").map((item) => item.assessmentId);
+    const jobRows = analyzingIds.length ? await prisma.siteConfig.findMany({
+      where: { key: { in: analyzingIds.map((id) => `report:job:${id}`) } },
+      select: { key: true, value: true },
+    }) : [];
+    const jobIssues = new Map<string, string>();
+    for (const row of jobRows) {
+      try {
+        const job = parseReportJob(row.value);
+        if (job.state === "FAILED") jobIssues.set(job.assessmentId, "任务失败，可核查后重试");
+        else if (isStaleReportJob(job)) jobIssues.set(job.assessmentId, "任务超时，可核查后重试");
+      } catch {
+        jobIssues.set(row.key.slice("report:job:".length), "任务记录异常，需人工核查");
+      }
+    }
 
     return NextResponse.json({
-      reports: paginatedItems,
+      reports: paginatedItems.map((item) => ({ ...item, jobIssue: jobIssues.get(item.assessmentId) ?? null })),
       total,
       page,
       pageSize,

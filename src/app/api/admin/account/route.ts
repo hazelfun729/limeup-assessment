@@ -2,15 +2,15 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import bcrypt from "bcryptjs";
 
-const SESSION_COOKIE = "admin_session";
+import { getAdminSession } from "@/lib/admin/auth";
 
 /**
  * GET /api/admin/account
  * Return current admin account info from session cookie
  */
-export async function GET(request: NextRequest) {
+export async function GET() {
   try {
-    const adminId = request.cookies.get(SESSION_COOKIE)?.value;
+    const adminId = (await getAdminSession())?.id;
 
     if (!adminId) {
       return NextResponse.json(
@@ -53,7 +53,7 @@ export async function GET(request: NextRequest) {
  */
 export async function PUT(request: NextRequest) {
   try {
-    const adminId = request.cookies.get(SESSION_COOKIE)?.value;
+    const adminId = (await getAdminSession())?.id;
 
     if (!adminId) {
       return NextResponse.json(
@@ -105,6 +105,8 @@ export async function PUT(request: NextRequest) {
       where: { id: admin.id },
       data: { passwordHash: newHash },
     });
+
+    await prisma.authSession.deleteMany({ where: { kind: "ADMIN", subjectId: admin.id } });
 
     // Log operation
     await prisma.operationLog.create({

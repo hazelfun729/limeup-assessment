@@ -53,7 +53,8 @@ export default function LogsPage() {
   }, [page]);
 
   useEffect(() => {
-    fetchLogs();
+    const timer = setTimeout(() => { fetchLogs(); }, 0);
+    return () => clearTimeout(timer);
   }, [fetchLogs]);
 
   return (

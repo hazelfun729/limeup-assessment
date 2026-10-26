@@ -1,4 +1,5 @@
 "use client";
+import Image from "next/image";
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
@@ -15,6 +16,8 @@ import {
 } from "lucide-react";
 
 const NAV_ITEMS = [
+  { href: "/admin/consultations", label: "咨询来信", icon: FileText },
+  { href: "/admin/profile-mails", label: "画像邮件", icon: FileText },
   { href: "/admin/dashboard", label: "数据概览", icon: LayoutDashboard },
   { href: "/admin/users", label: "用户管理", icon: Users },
   { href: "/admin/reports", label: "报告管理", icon: FileText },
@@ -45,7 +48,7 @@ function AdminSidebar() {
       {/* Logo */}
       <div className="flex items-center gap-2 border-b border-border px-5 py-4">
         <Link href="/admin/dashboard" className="flex items-center gap-2">
-          <img src="/logo.png" alt="青柠伴学" className="h-7 w-7 rounded" />
+          <Image width={48} height={48} src="/logo.png" alt="青柠伴学" className="h-7 w-7 rounded" />
           <span className="text-sm font-semibold text-foreground">
             运营工作台
           </span>

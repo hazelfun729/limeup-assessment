@@ -2,24 +2,31 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
+import { usePathname } from "next/navigation";
 
 const FONT = '"PingFang SC", -apple-system, "Helvetica Neue", sans-serif';
 
 export function SiteHeader() {
-  const [loggedIn, setLoggedIn] = useState(false);
+  const pathname = usePathname();
+  const [loggedIn, setLoggedIn] = useState<boolean | null>(null);
   const [checking, setChecking] = useState(true);
   const [email, setEmail] = useState("");
 
   useEffect(() => {
-    fetch("/api/auth/session")
-      .then((res) => (res.ok ? res.json() : { authenticated: false }))
+    const controller = new AbortController();
+    fetch("/api/auth/session", { cache: "no-store", signal: controller.signal })
+      .then((res) => {
+        if (!res.ok) throw new Error("账户状态暂不可用");
+        return res.json();
+      })
       .then((data) => {
         setLoggedIn(data.authenticated);
-        if (data.user?.email) setEmail(data.user.email);
+        setEmail(data.user?.email ?? "");
       })
-      .catch(() => setLoggedIn(false))
+      .catch(() => {})
       .finally(() => setChecking(false));
-  }, []);
+    return () => controller.abort();
+  }, [pathname]);
 
   return (
     <header className="relative z-10 flex items-center justify-between px-6 pt-4 pb-2 md:px-12">
@@ -33,7 +40,7 @@ export function SiteHeader() {
           style={{ display: "block" }}
         />
       </Link>
-      {checking ? null : loggedIn ? (
+      {checking || loggedIn === null ? null : loggedIn ? (
         <Link
           href="/account"
           className="text-sm text-muted-foreground transition-colors hover:text-foreground"

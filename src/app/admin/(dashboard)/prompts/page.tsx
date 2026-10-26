@@ -39,7 +39,8 @@ export default function ReportSettingsPage() {
   }, []);
 
   useEffect(() => {
-    fetchPrompts();
+    const timer = setTimeout(() => { fetchPrompts(); }, 0);
+    return () => clearTimeout(timer);
   }, [fetchPrompts]);
 
   return (
@@ -94,7 +95,7 @@ export default function ReportSettingsPage() {
             ) : prompts.length === 0 ? (
               <tr>
                 <td colSpan={8} className="px-4 py-12 text-center text-muted-foreground">
-                  暂无提示词，请点击"新建提示词"创建
+                  暂无提示词，请点击“新建提示词”创建
                 </td>
               </tr>
             ) : (

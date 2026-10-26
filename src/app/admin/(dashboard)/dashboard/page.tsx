@@ -8,16 +8,13 @@ import {
   FileText,
   CreditCard,
   CheckCircle,
-  Users,
   ScrollText,
-  RefreshCw,
   ChevronLeft,
   ChevronRight,
 } from "lucide-react";
 
 type DashboardData = {
   today: {
-    visitors: number;
     assessments: number;
     completions: number;
     registrations: number;
@@ -42,10 +39,7 @@ type LogEntry = {
   createdAt: string;
 };
 
-const MOCK_DATA: DashboardData = {
-  today: { visitors: 0, assessments: 0, completions: 0, registrations: 0, payments: 0 },
-  queue: { pendingPayments: 0, analyzingReports: 0, reviewingReports: 0, sendingReports: 0, sentReports: 0, failedReports: 0 },
-};
+
 
 const ACTION_LABELS: Record<string, string> = {
   login: "登录",
@@ -82,6 +76,7 @@ function QueueItem({ label, count, href, variant = "default" }: { label: string;
 }
 
 export default function DashboardPage() {
+  const [error, setError] = useState<string | null>(null);
   const [data, setData] = useState<DashboardData | null>(null);
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [logPage, setLogPage] = useState(1);
@@ -93,7 +88,7 @@ export default function DashboardPage() {
         const res = await fetch("/api/admin/dashboard");
         if (res.ok) { setData(await res.json()); return; }
       } catch {}
-      setData(MOCK_DATA);
+      setError("无法加载后台数据，请重新登录或稍后重试");
     }
     fetchDashboard();
   }, []);
@@ -110,8 +105,12 @@ export default function DashboardPage() {
     } catch {}
   }, [logPage]);
 
-  useEffect(() => { fetchLogs(); }, [fetchLogs]);
+  useEffect(() => {
+    const timer = setTimeout(() => { fetchLogs(); }, 0);
+    return () => clearTimeout(timer);
+  }, [fetchLogs]);
 
+  if (error) return <p role="alert" className="p-8">{error}</p>;
   if (!data) {
     return (
       <div className="flex h-dvh items-center justify-center">
@@ -129,7 +128,6 @@ export default function DashboardPage() {
 
       {/* Today's metrics */}
       <motion.div className="grid grid-cols-2 gap-4 md:grid-cols-5" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3, delay: 0.05 }}>
-        <StatCard label="今日访问" value={data.today.visitors} icon={Users} />
         <StatCard label="开始测评" value={data.today.assessments} icon={FileText} />
         <StatCard label="完成测评" value={data.today.completions} icon={CheckCircle} />
         <StatCard label="今日注册" value={data.today.registrations} icon={UserCheck} />

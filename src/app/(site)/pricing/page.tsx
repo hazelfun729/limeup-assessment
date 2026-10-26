@@ -1,3 +1,4 @@
+import { REPORT_PRICE } from "@/lib/profile/content";
 import Link from "next/link";
 import { ArrowLeft, Check, Star } from "lucide-react";
 
@@ -70,8 +71,8 @@ export default function PricingPage() {
             <div className="space-y-1">
               <h3 className="text-base font-semibold text-foreground">成长导航手册</h3>
               <div className="flex items-baseline gap-2">
-                <span className="text-2xl font-bold text-foreground">¥9.9</span>
-                <span className="text-sm text-muted-foreground line-through">¥99</span>
+                <span className="text-2xl font-bold text-foreground">¥{REPORT_PRICE.current}</span>
+                <span className="text-sm text-muted-foreground line-through">¥{REPORT_PRICE.original}</span>
               </div>
             </div>
             <p className="text-sm text-muted-foreground">

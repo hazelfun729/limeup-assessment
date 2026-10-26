@@ -40,7 +40,10 @@ export default function AdminsPage() {
     setLoading(false);
   };
 
-  useEffect(() => { fetchAdmins(); }, []);
+  useEffect(() => {
+    const timer = setTimeout(() => { fetchAdmins(); }, 0);
+    return () => clearTimeout(timer);
+  }, []);
 
   // Close menu on outside click
   useEffect(() => {

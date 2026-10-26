@@ -1,5 +1,5 @@
 {
-  "buildCommand": "cp prisma/schema.prisma.pg.bak prisma/schema.prisma && npx prisma generate && npx prisma db push --accept-data-loss && npm run db:seed && next build",
+  "buildCommand": "npx prisma generate && next build",
   "installCommand": "npm install",
   "framework": "nextjs",
   "outputDirectory": ".next"

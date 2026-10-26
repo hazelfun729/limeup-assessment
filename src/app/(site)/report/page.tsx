@@ -1,17 +1,16 @@
 import { redirect } from "next/navigation";
-import { cookies } from "next/headers";
 import { prisma } from "@/lib/prisma";
+import { getUserSession } from "@/lib/user/auth";
 
 export default async function ReportRootPage() {
-  const cookieStore = await cookies();
-  const userId = cookieStore.get("user_session")?.value;
+  const user = await getUserSession();
 
-  if (!userId) {
+  if (!user) {
     redirect("/login?redirect=%2Freport");
   }
 
   const assessment = await prisma.assessment.findFirst({
-    where: { userId, status: "COMPLETED" },
+    where: { userId: user.id, status: "COMPLETED" },
     orderBy: { completedAt: "desc" },
     select: { id: true },
   });

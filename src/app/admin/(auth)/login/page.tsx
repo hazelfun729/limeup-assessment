@@ -1,4 +1,5 @@
 "use client";
+import Image from "next/image";
 
 import { useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
@@ -11,13 +12,15 @@ function LoginForm() {
   const searchParams = useSearchParams();
   const redirect = searchParams.get("redirect") || "/admin/dashboard";
 
-  const [login, setLogin] = useState("");
-  const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    const form = e.currentTarget as HTMLFormElement;
+    const data = new FormData(form);
+    const login = String(data.get("login") || "").trim();
+    const password = String(data.get("password") || "");
     if (!login || !password) return;
     setLoading(true);
     setError("");
@@ -35,7 +38,7 @@ function LoginForm() {
         return;
       }
 
-      router.push(redirect);
+      router.push(redirect.startsWith("/admin") && !redirect.includes("\\") ? redirect : "/admin/dashboard");
     } catch {
       setError("网络错误，请稍后重试");
     } finally {
@@ -44,9 +47,9 @@ function LoginForm() {
   };
 
   return (
-    <form onSubmit={handleSubmit} className="w-full max-w-sm space-y-6">
+    <form method="post" onSubmit={handleSubmit} className="w-full max-w-sm space-y-6">
       <div className="text-center">
-        <img
+        <Image width={48} height={48}
           src="/logo.png"
           alt="青柠伴学"
           className="mx-auto mb-4 h-12 w-12 rounded-xl"
@@ -59,17 +62,17 @@ function LoginForm() {
 
       <div className="space-y-4">
         <Input
+          name="login"
           placeholder="账号（用户名或邮箱）"
-          value={login}
-          onChange={(e) => setLogin(e.target.value)}
+          required
           className="h-12 rounded-xl"
           autoComplete="username"
         />
         <Input
+          name="password"
           type="password"
           placeholder="密码"
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
+          required
           className="h-12 rounded-xl"
           autoComplete="current-password"
         />
@@ -78,7 +81,7 @@ function LoginForm() {
 
         <Button
           type="submit"
-          disabled={!login || !password || loading}
+          disabled={loading}
           className="h-12 w-full rounded-full bg-primary text-primary-foreground hover:brightness-95"
         >
           {loading ? "登录中..." : "登录"}

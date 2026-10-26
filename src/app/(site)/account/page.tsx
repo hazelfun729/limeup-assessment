@@ -39,6 +39,7 @@ type AssessmentItem = {
     createdAt: string;
   } | null;
   handbookStatus: string | null;
+  handbookId: string | null;
   handbookSentAt: string | null;
   paymentStatus: string | null;
 };
@@ -70,8 +71,8 @@ const HANDBOOK_STATUS_MAP: Record<
   { label: string; desc: string; icon: typeof Clock; color: string }
 > = {
   ANALYZING: {
-    label: "手册分析中",
-    desc: "正在为孩子整理成长导航手册",
+    label: "报告整理中",
+    desc: "正在为孩子整理成长导航报告",
     icon: FileSearch,
     color: "text-amber-600 bg-amber-50",
   },
@@ -89,7 +90,7 @@ const HANDBOOK_STATUS_MAP: Record<
   },
   SENT: {
     label: "报告已发送",
-    desc: "成长导航手册已发送至注册邮箱",
+    desc: "成长导航报告已发送至注册邮箱，也可以在线查看",
     icon: CheckCircle2,
     color: "text-emerald-600 bg-emerald-50",
   },
@@ -424,6 +425,16 @@ export default function AccountPage() {
                           })()}
                         </div>
                       )}
+
+                    {a.handbookStatus === "SENT" && a.handbookId && (
+                      <Link
+                        href={`/report/${a.handbookId}`}
+                        className="flex min-h-11 items-center justify-between border-t border-border px-4 text-sm font-medium text-primary"
+                      >
+                        查看成长导航报告
+                        <ChevronRight className="h-4 w-4" />
+                      </Link>
+                    )}
 
                     {/* No payment yet - show CTA */}
                     {!a.handbookStatus && !a.paymentStatus && (

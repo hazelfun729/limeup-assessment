@@ -12,21 +12,28 @@ export default function AssessmentStartPage() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    let cancelled = false;
     async function createAssessment() {
       try {
-        const res = await fetch("/api/assessment", { method: "POST" });
+        let key = sessionStorage.getItem("assessment_start_key");
+        if (!key) {
+          key = Array.from(crypto.getRandomValues(new Uint8Array(32)), b => b.toString(16).padStart(2, "0")).join("");
+          sessionStorage.setItem("assessment_start_key", key);
+        }
+        const res = await fetch("/api/assessment", { method: "POST", headers: { "Idempotency-Key": key } });
         if (!res.ok) {
           const data = await res.json().catch(() => ({}));
           throw new Error(data.error || "创建测评失败");
         }
         const { id } = await res.json();
-        router.replace(`/transition?stage=1&assessmentId=${id}`);
+        if (!cancelled) router.replace(`/transition?stage=1&assessmentId=${id}`);
       } catch (err) {
         console.error("Failed to create assessment:", err);
         setError(err instanceof Error ? err.message : "创建测评失败，请稍后重试");
       }
     }
     createAssessment();
+    return () => { cancelled = true; };
   }, [router]);
 
   if (error) {

@@ -1,19 +1,18 @@
 import { redirect } from "next/navigation";
-import { cookies } from "next/headers";
 import { prisma } from "@/lib/prisma";
+import { getUserSession } from "@/lib/user/auth";
 
 export default async function PaymentRootPage() {
-  const cookieStore = await cookies();
-  const userId = cookieStore.get("user_session")?.value;
+  const user = await getUserSession();
 
-  if (!userId) {
+  if (!user) {
     redirect("/login?redirect=%2Fpayment");
   }
 
   // Find user's most recent assessment that needs payment
   const assessment = await prisma.assessment.findFirst({
     where: {
-      userId,
+      userId: user.id,
       status: "COMPLETED",
       payment: null,
     },
@@ -28,7 +27,7 @@ export default async function PaymentRootPage() {
   // If all assessments are paid, check for pending payments
   const pendingPayment = await prisma.payment.findFirst({
     where: {
-      userId,
+      userId: user.id,
       status: { in: ["PENDING", "CONFIRMED"] },
     },
     orderBy: { createdAt: "desc" },

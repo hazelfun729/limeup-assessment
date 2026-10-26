@@ -1,130 +1,44 @@
+import { after } from "next/server";
+import { sendProfileEmail } from "@/lib/profile/email";
+import { rateLimit } from "@/lib/security/rate-limit";
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { getSessionCookieName, getSessionMaxAge } from "@/lib/user/auth";
+import { createSession, sessionOptions } from "@/lib/security/session";
+import { assessmentAccess, completionError } from "@/lib/security/assessment";
+import { getSessionMaxAge } from "@/lib/user/auth";
+import { bindCompletedAssessment } from "@/lib/assessment/bind";
 
-/**
- * POST /api/auth/register
- * Register via email + verification code (with optional password)
- * Body: { email, code, password?, assessmentId? }
- * If user doesn't exist: create user, verify code, set session
- * If user exists: verify code, update password if provided, set session
- */
 export async function POST(request: NextRequest) {
   try {
-    const { email, code, password, assessmentId } = await request.json();
+    const { email, code, assessmentId } = await request.json();
+    if (typeof email !== "string" || typeof code !== "string" || !/^\d{6}$/.test(code)) return NextResponse.json({ error: "请输入邮箱和六位验证码" }, { status: 400 });
+    const limited = await rateLimit("verify", email, 10, 300);
+    if (limited) return limited;
 
-    if (!email || !code) {
-      return NextResponse.json(
-        { error: "邮箱和验证码为必填项" },
-        { status: 400 }
-      );
-    }
-
-    // Find or check user existence
-    let user = await prisma.user.findUnique({ where: { email } });
-
-    if (!user) {
-      return NextResponse.json(
-        { error: "用户不存在，请先发送验证码" },
-        { status: 404 }
-      );
-    }
-
-    // Verify code
-    if (!user.verificationCode || !user.codeExpiresAt) {
-      return NextResponse.json(
-        { error: "请先发送验证码" },
-        { status: 400 }
-      );
-    }
-
-    if (user.codeExpiresAt < new Date()) {
-      return NextResponse.json(
-        { error: "验证码已过期，请重新发送" },
-        { status: 400 }
-      );
-    }
-
-    if (user.verificationCode !== code) {
-      return NextResponse.json(
-        { error: "验证码不正确" },
-        { status: 400 }
-      );
-    }
-
-    // Hash password if provided
-    let passwordHash: string | null = null;
-    if (password) {
-      const bcrypt = await import("bcryptjs");
-      passwordHash = await bcrypt.hash(password, 10);
-    }
-
-    // Update user: verify email, clear code, set password
-    await prisma.user.update({
-      where: { id: user.id },
-      data: {
-        emailVerified: true,
-        verificationCode: null,
-        codeExpiresAt: null,
-        ...(passwordHash ? { passwordHash } : {}),
-      },
-    });
-
-    // Link assessment if provided
     if (assessmentId) {
-      const assessment = await prisma.assessment.findUnique({
-        where: { id: assessmentId },
-      });
-      if (assessment) {
-        await prisma.assessment.update({
-          where: { id: assessmentId },
-          data: {
-            userId: user.id,
-            status: "COMPLETED",
-            completedAt: new Date(),
-          },
-        });
+      if (typeof assessmentId !== "string") return NextResponse.json({ error: "测评ID不正确" }, { status: 400 });
+      const denied = await assessmentAccess(assessmentId);
+      if (denied) return denied;
+      const error = await completionError(assessmentId);
+      if (error) return NextResponse.json({ error }, { status: 400 });
+    }
+    const user = await prisma.user.findUnique({ where: { email: email.trim().toLowerCase() } });
+    if (!user || user.verificationCode !== code || !user.codeExpiresAt || user.codeExpiresAt <= new Date()) return NextResponse.json({ error: "验证码不正确或已过期" }, { status: 400 });
+    await prisma.$transaction(async tx => {
+      const verified = await tx.user.updateMany({ where: { id: user.id, verificationCode: code, codeExpiresAt: { gt: new Date() } }, data: { emailVerified: true, verificationCode: null, codeExpiresAt: null } });
+      if (!verified.count) throw new Error("Code already used");
+      if (assessmentId) {
+        await bindCompletedAssessment(tx, assessmentId, user.id);
       }
-    }
-
-    // Auto-create CRM contact
-    const existingCrm = await prisma.cRMContact.findUnique({
-      where: { userId: user.id },
+      else await tx.cRMContact.upsert({ where: { userId: user.id }, create: { userId: user.id, tags: ["测评用户"], source: "测评网站" }, update: {} });
     });
-    if (!existingCrm) {
-      await prisma.cRMContact.create({
-        data: {
-          userId: user.id,
-          tags: ["测评用户"],
-          source: "测评网站",
-        },
-      });
-    }
-
-    // Set session cookie
-    const cookieName = getSessionCookieName();
+    if (assessmentId) after(async () => { try { await sendProfileEmail(assessmentId); } catch { console.error("Profile email processing failed"); } });
+    const response = NextResponse.json({ success: true, userId: user.id, email: user.email, assessmentId });
     const maxAge = getSessionMaxAge();
-
-    const response = NextResponse.json({
-      success: true,
-      userId: user.id,
-      email: user.email,
-    });
-
-    response.cookies.set(cookieName, user.id, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === "production",
-      sameSite: "lax",
-      maxAge,
-      path: "/",
-    });
-
+    response.cookies.set("user_session", await createSession("USER", user.id, maxAge), sessionOptions(maxAge));
     return response;
   } catch (error) {
-    console.error("Register error:", error);
-    return NextResponse.json(
-      { error: "注册失败，请稍后重试" },
-      { status: 500 }
-    );
+    console.error("Registration failed", error);
+    return NextResponse.json({ error: "注册失败，请刷新后重试" }, { status: 400 });
   }
 }

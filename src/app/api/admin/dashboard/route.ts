@@ -1,16 +1,15 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { cookies } from "next/headers";
+import { getAdminSession } from "@/lib/admin/auth";
 
 /**
  * GET /api/admin/dashboard
  * Dashboard metrics: today's stats + status queue counters
  */
-export async function GET(request: NextRequest) {
+export async function GET() {
   try {
     // Verify admin session
-    const cookieStore = await cookies();
-    const sessionId = cookieStore.get("admin_session")?.value;
+    const sessionId = (await getAdminSession())?.id;
     if (!sessionId) {
       return NextResponse.json({ error: "未登录" }, { status: 401 });
     }
@@ -20,7 +19,6 @@ export async function GET(request: NextRequest) {
 
     // Run all queries in parallel
     const [
-      todayVisitors,
       todayAssessments,
       todayCompletions,
       todayRegistrations,
@@ -32,10 +30,6 @@ export async function GET(request: NextRequest) {
       sentReports,
       failedReports,
     ] = await Promise.all([
-      // Today's visitors (unique assessment starts)
-      prisma.assessment.count({
-        where: { startedAt: { gte: today } },
-      }),
       // Today's assessment starts
       prisma.assessment.count({
         where: { startedAt: { gte: today } },
@@ -63,7 +57,6 @@ export async function GET(request: NextRequest) {
 
     return NextResponse.json({
       today: {
-        visitors: todayVisitors,
         assessments: todayAssessments,
         completions: todayCompletions,
         registrations: todayRegistrations,

@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useCallback } from "react";
 import Link from "next/link";
-import { Search, RefreshCw, ChevronLeft, ChevronRight, Users as UsersIcon, UserCog } from "lucide-react";
+import { Search, ChevronLeft, ChevronRight, Users as UsersIcon, UserCog } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 
@@ -80,7 +80,10 @@ function UsersTab() {
     setLoading(false);
   }, [page, search]);
 
-  useEffect(() => { fetchUsers(); }, [fetchUsers]);
+  useEffect(() => {
+    const timer = setTimeout(() => { fetchUsers(); }, 0);
+    return () => clearTimeout(timer);
+  }, [fetchUsers]);
 
   return (
     <div className="space-y-4">
@@ -176,7 +179,10 @@ function CRMTab() {
     setLoading(false);
   }, [page, search, intentionFilter]);
 
-  useEffect(() => { fetchContacts(); }, [fetchContacts]);
+  useEffect(() => {
+    const timer = setTimeout(() => { fetchContacts(); }, 0);
+    return () => clearTimeout(timer);
+  }, [fetchContacts]);
 
   return (
     <div className="space-y-4">

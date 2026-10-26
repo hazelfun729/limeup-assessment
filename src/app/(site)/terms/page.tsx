@@ -26,7 +26,7 @@ export default function TermsPage() {
         <section className="space-y-3">
           <h2 className="text-lg font-semibold text-foreground">一、服务说明</h2>
           <p className="text-sm leading-relaxed text-muted-foreground">
-            LIMEUP（青柠伴学）自主学习力测评（以下简称"本服务"）由上海春华秋实公益基金会提供。本服务旨在帮助家长了解孩子的自主学习力状况，提供成长参考建议。本服务不构成任何医学诊断、心理治疗或教育决策建议。
+            LIMEUP（青柠伴学）自主学习力测评（以下简称“本服务”）由上海春华秋实公益基金会提供。本服务旨在帮助家长了解孩子的自主学习力状况，提供成长参考建议。本服务不构成任何医学诊断、心理治疗或教育决策建议。
           </p>
         </section>
 

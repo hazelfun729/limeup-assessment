@@ -58,7 +58,8 @@ export default function CRMPage() {
   }, [page, search, intentionFilter]);
 
   useEffect(() => {
-    fetchContacts();
+    const timer = setTimeout(() => { fetchContacts(); }, 0);
+    return () => clearTimeout(timer);
   }, [fetchContacts]);
 
   return (

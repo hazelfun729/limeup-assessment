@@ -1,4 +1,4 @@
-// Assessment V3 - Prisma Schema (SQLite)
+// Assessment V3 - Prisma Schema
 // Growth OS 自主学习力测评
 
 generator client {
@@ -7,7 +7,64 @@ generator client {
 }
 
 datasource db {
-  provider = "sqlite"
+  provider = "postgresql"
+}
+
+// ==========================================
+// Enums
+// ==========================================
+
+enum AssessmentStatus {
+  IN_PROGRESS
+  COMPLETED
+  ABANDONED
+}
+
+enum PaymentStatus {
+  PENDING
+  CONFIRMED
+  FAILED
+  REFUNDED
+}
+
+enum PaymentMethod {
+  WECHAT_PAY
+  ALIPAY
+  STRIPE
+}
+
+enum ReportStatus {
+  ANALYZING
+  REVIEWING
+  SENDING
+  SENT
+  FAILED
+  NEEDS_MANUAL_REVIEW
+}
+
+enum EmailType {
+  VERIFICATION
+  HANDBOOK
+  PASSWORD_RESET
+}
+
+enum EmailStatus {
+  PENDING
+  SENT
+  FAILED
+}
+
+enum AdminRole {
+  SUPER_ADMIN
+  OPERATOR
+  REVIEWER
+  SUPPORT
+}
+
+enum PromptType {
+  REPORT_GENERATION
+  AI_CHECK
+  REPORT_REGENERATION
 }
 
 // ==========================================
@@ -77,10 +134,10 @@ model Question {
   versionId       String
   order           Int
   stage           Int
-  content         String
+  content         String   @db.Text
   isReverseScored Boolean  @default(false)
   moduleId        String
-  scoreValues     Json
+  scoreValues     Json     @default("{\"veryMatch\": 100, \"somewhatMatch\": 90, \"somewhatNotMatch\": 30, \"veryNotMatch\": 0}")
   isActive        Boolean  @default(true)
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
@@ -123,6 +180,8 @@ model User {
   createdAt        DateTime  @default(now())
   updatedAt        DateTime  @updatedAt
 
+  consultationLetters ConsultationLetter[]
+  deliveries Delivery[]
   assessments    Assessment[]
   growthProfiles GrowthProfile[]
   handbooks      GrowthHandbook[]
@@ -138,13 +197,13 @@ model User {
 // ==========================================
 
 model Assessment {
-  id                String   @id @default(cuid())
+  id                String           @id @default(cuid())
   userId            String?
   questionVersionId String
-  status            String   @default("IN_PROGRESS")
-  currentQuestion   Int      @default(1)
+  status            AssessmentStatus @default(IN_PROGRESS)
+  currentQuestion   Int              @default(1)
   answers           Json?
-  startedAt         DateTime @default(now())
+  startedAt         DateTime         @default(now())
   completedAt       DateTime?
   source            String?
   ip                String?
@@ -154,12 +213,13 @@ model Assessment {
   studentGender     String?
   grade             String?
   phone             String?
-  interests         String?
+  interests         String?          @db.Text
   referrer          String?
 
   user            User?              @relation(fields: [userId], references: [id])
   questionVersion QuestionVersion    @relation(fields: [questionVersionId], references: [id])
   answerRecords   AssessmentAnswer[]
+  consultationLetter ConsultationLetter?
   growthProfile   GrowthProfile?
   handbook        GrowthHandbook?
   payment         Payment?
@@ -199,10 +259,10 @@ model GrowthProfile {
   moduleScores      Json
   strengths         Json?
   weaknesses        Json?
-  growthFocus       String?
-  growthFocusDetail String?
-  actionSuggestion  String?
-  summary           String?
+  growthFocus       String?  @db.Text
+  growthFocusDetail String?  @db.Text
+  actionSuggestion  String?  @db.Text
+  summary           String?  @db.Text
   createdAt         DateTime @default(now())
 
   user       User       @relation(fields: [userId], references: [id])
@@ -216,23 +276,23 @@ model GrowthProfile {
 // ==========================================
 
 model GrowthHandbook {
-  id            String   @id @default(cuid())
+  id            String       @id @default(cuid())
   userId        String
-  assessmentId  String   @unique
-  status        String   @default("ANALYZING")
+  assessmentId  String       @unique
+  status        ReportStatus @default(ANALYZING)
   content       Json?
-  contentHtml   String?
-  aiRawOutput   String?
+  contentHtml   String?      @db.Text
+  aiRawOutput   String?      @db.Text
   promptId      String?
   promptVersion Int?
   reviewedBy    String?
   reviewedAt    DateTime?
-  reviewNotes   String?
+  reviewNotes   String?      @db.Text
   sentAt        DateTime?
   sentTo        String?
-  version       Int      @default(1)
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  version       Int          @default(1)
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
 
   user       User       @relation(fields: [userId], references: [id])
   assessment Assessment @relation(fields: [assessmentId], references: [id])
@@ -247,20 +307,21 @@ model GrowthHandbook {
 // ==========================================
 
 model Payment {
-  id             String    @id @default(cuid())
+  id             String        @id @default(cuid())
   userId         String
-  assessmentId   String    @unique
-  amount         Float
-  originalAmount Float?
-  method         String    @default("WECHAT_PAY")
-  status         String    @default("PENDING")
-  orderNo        String?   @unique
+  assessmentId   String        @unique
+  amount         Decimal       @db.Decimal(10, 2)
+  originalAmount Decimal?      @db.Decimal(10, 2)
+  method         PaymentMethod @default(WECHAT_PAY)
+  status         PaymentStatus @default(PENDING)
+  orderNo        String?       @unique
+  wechatTransactionId String?  @unique
   screenshot     String?
   remark         String?
   confirmedBy    String?
   confirmedAt    DateTime?
-  createdAt      DateTime  @default(now())
-  updatedAt      DateTime  @updatedAt
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
 
   user       User       @relation(fields: [userId], references: [id])
   assessment Assessment @relation(fields: [assessmentId], references: [id])
@@ -274,16 +335,16 @@ model Payment {
 // ==========================================
 
 model Prompt {
-  id          String   @id @default(cuid())
+  id          String     @id @default(cuid())
   name        String
-  type        String
-  content     String
-  version     Int      @default(1)
-  isActive    Boolean  @default(true)
+  type        PromptType
+  content     String     @db.Text
+  version     Int        @default(1)
+  isActive    Boolean    @default(true)
   description String?
   createdBy   String?
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
 
   handbooks GrowthHandbook[]
 
@@ -296,17 +357,17 @@ model Prompt {
 // ==========================================
 
 model Email {
-  id           String   @id @default(cuid())
+  id           String      @id @default(cuid())
   userId       String
-  type         String
+  type         EmailType
   to           String
   subject      String
-  body         String?
-  status       String   @default("PENDING")
+  body         String?     @db.Text
+  status       EmailStatus @default(PENDING)
   sentAt       DateTime?
-  failedReason String?
-  retryCount   Int      @default(0)
-  createdAt    DateTime @default(now())
+  failedReason String?     @db.Text
+  retryCount   Int         @default(0)
+  createdAt    DateTime    @default(now())
 
   user User @relation(fields: [userId], references: [id])
 
@@ -319,20 +380,20 @@ model Email {
 // ==========================================
 
 model CRMContact {
-  id                      String   @id @default(cuid())
-  userId                  String   @unique
-  tags                    Json     @default("[]")
+  id                      String    @id @default(cuid())
+  userId                  String    @unique
+  tags                    String[]
   owner                   String?
   source                  String?
   intentionLevel          String?
-  learningPlanetIntention Boolean  @default(false)
-  coachIntention          Boolean  @default(false)
+  learningPlanetIntention Boolean   @default(false)
+  coachIntention          Boolean   @default(false)
   retestReminder          DateTime?
   lastContactAt           DateTime?
-  wechatAdded             Boolean  @default(false)
-  notes                   String?
-  createdAt               DateTime @default(now())
-  updatedAt               DateTime @updatedAt
+  wechatAdded             Boolean   @default(false)
+  notes                   String?   @db.Text
+  createdAt               DateTime  @default(now())
+  updatedAt               DateTime  @updatedAt
 
   user      User          @relation(fields: [userId], references: [id])
   followUps CRMFollowUp[]
@@ -344,7 +405,7 @@ model CRMContact {
 model CRMFollowUp {
   id        String   @id @default(cuid())
   contactId String
-  content   String
+  content   String   @db.Text
   createdBy String
   createdAt DateTime @default(now())
 
@@ -362,7 +423,7 @@ model Admin {
   username     String    @unique
   email        String    @unique
   passwordHash String
-  role         String    @default("OPERATOR")
+  role         AdminRole @default(OPERATOR)
   isActive     Boolean   @default(true)
   lastLoginAt  DateTime?
   createdAt    DateTime  @default(now())
@@ -381,7 +442,7 @@ model OperationLog {
   adminName String?
   action    String
   target    String?
-  details   String?
+  details   String?  @db.Text
   ip        String?
   createdAt DateTime @default(now())
 
@@ -397,6 +458,59 @@ model OperationLog {
 model SiteConfig {
   id        String   @id @default(cuid())
   key       String   @unique
-  value     String
+  value     String   @db.Text
   updatedAt DateTime @updatedAt
+}
+
+// Opaque, revocable credentials. Only token hashes are persisted.
+model AuthSession {
+  tokenHash String @id
+  kind String
+  subjectId String
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+  @@index([kind, subjectId])
+  @@index([expiresAt])
+}
+
+model AuthRateLimit {
+  key String @id
+  count Int @default(1)
+  expiresAt DateTime
+}
+
+// One free initial letter per completed assessment.
+model ConsultationLetter {
+  id String @id @default(cuid())
+  assessmentId String @unique
+  userId String
+  email String
+  answers Json
+  reply String? @db.Text
+  status String @default("PENDING")
+  repliedBy String?
+  sentAt DateTime?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  assessment Assessment @relation(fields: [assessmentId], references: [id], onDelete: Cascade)
+  @@index([userId])
+}
+
+// Persist before sending; SENDING is never retried automatically (delivery may be ambiguous).
+model Delivery {
+  id String @id
+  kind String
+  userId String
+  to String
+  subject String
+  html String @db.Text
+  status String @default("PENDING")
+  attempts Int @default(0)
+  error String?
+  sentAt DateTime?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  @@index([status])
 }

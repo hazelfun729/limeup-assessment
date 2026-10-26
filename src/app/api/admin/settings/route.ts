@@ -1,19 +1,19 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { cookies } from "next/headers";
+import { getAdminSession } from "@/lib/admin/auth";
 
 /**
  * GET /api/admin/settings
  * Get all site configuration entries
  */
-export async function GET(request: NextRequest) {
+export async function GET() {
   try {
-    const cookieStore = await cookies();
-    if (!cookieStore.get("admin_session")?.value) {
+    if (!(await getAdminSession())?.id) {
       return NextResponse.json({ error: "未登录" }, { status: 401 });
     }
 
     const configs = await prisma.siteConfig.findMany({
+      where: { NOT: { key: { startsWith: "report:" } } },
       orderBy: { key: "asc" },
     });
 
@@ -39,8 +39,7 @@ export async function GET(request: NextRequest) {
  */
 export async function PUT(request: NextRequest) {
   try {
-    const cookieStore = await cookies();
-    const adminId = cookieStore.get("admin_session")?.value;
+    const adminId = (await getAdminSession())?.id;
     if (!adminId) {
       return NextResponse.json({ error: "未登录" }, { status: 401 });
     }
@@ -59,6 +58,8 @@ export async function PUT(request: NextRequest) {
       where: { id: adminId },
       select: { username: true },
     });
+
+    if (Object.keys(settings).some(key => key.startsWith("report:"))) return NextResponse.json({error:"报告运行记录不可通过网站设置修改"},{status:400});
 
     // Upsert each setting
     const ops = Object.entries(settings).map(([key, value]) =>

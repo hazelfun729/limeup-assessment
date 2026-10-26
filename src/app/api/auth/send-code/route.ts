@@ -1,27 +1,10 @@
+import { randomInt } from "node:crypto";
+import { rateLimit } from "@/lib/security/rate-limit";
+import { assessmentAccess } from "@/lib/security/assessment";
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { Resend } from "resend";
-import nodemailer from "nodemailer";
-
-// Email provider priority: SMTP (阿里云) > Resend > Dev Mode
-const resend = process.env.RESEND_API_KEY
-  ? new Resend(process.env.RESEND_API_KEY)
-  : null;
-
-const smtpTransport = process.env.SMTP_HOST
-  ? nodemailer.createTransport({
-      host: process.env.SMTP_HOST,
-      port: Number(process.env.SMTP_PORT) || 465,
-      secure: (Number(process.env.SMTP_PORT) || 465) === 465,
-      auth: {
-        user: process.env.SMTP_USER,
-        pass: process.env.SMTP_PASS,
-      },
-    })
-  : null;
-
-const FROM_NAME = "青柠伴学";
-const FROM_ADDR = process.env.SMTP_USER || "noreply@limeup-happystudy.com";
+import { mailConfigured, sendMailMessage } from "@/lib/mail/transport";
+import { mailErrorMessage } from "@/lib/mail/delivery";
 
 function verificationHtml(code: string) {
   return `
@@ -55,7 +38,9 @@ function verificationHtml(code: string) {
  */
 export async function POST(request: NextRequest) {
   try {
-    const { email, assessmentId } = await request.json();
+    const body = await request.json();
+    const email = typeof body.email === "string" ? body.email.trim().toLowerCase() : "";
+    const assessmentId = body.assessmentId;
 
     if (!email) {
       return NextResponse.json({ error: "邮箱为必填项" }, { status: 400 });
@@ -66,8 +51,15 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "请输入有效的邮箱地址" }, { status: 400 });
     }
 
+    if (!mailConfigured()) return NextResponse.json({ error: "邮件服务尚未配置，请联系客服" }, { status: 503 });
+    const limited = await rateLimit("send-code", email, 1, 60);
+    if (limited) return limited;
+
     // Verify assessment exists if ID provided
     if (assessmentId) {
+      if (typeof assessmentId !== "string") return NextResponse.json({ error: "测评ID不正确" }, { status: 400 });
+      const denied = await assessmentAccess(assessmentId);
+      if (denied) return denied;
       const assessment = await prisma.assessment.findUnique({
         where: { id: assessmentId },
       });
@@ -77,7 +69,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Generate 6-digit code, valid for 5 minutes
-    const code = Math.floor(100000 + Math.random() * 900000).toString();
+    const code = randomInt(100000, 1000000).toString();
     const expiresAt = new Date(Date.now() + 5 * 60 * 1000);
     const subject = "青柠伴学 - 邮箱验证码";
 
@@ -94,96 +86,13 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    // ── Send email ──
-
-    if (smtpTransport) {
-      // Priority 1: SMTP (阿里云邮件推送)
-      try {
-        await smtpTransport.sendMail({
-          from: `"${FROM_NAME}" <${FROM_ADDR}>`,
-          to: email,
-          subject,
-          html: verificationHtml(code),
-        });
-        await prisma.email.create({
-          data: {
-            userId: user.id,
-            type: "VERIFICATION",
-            to: email,
-            subject,
-            status: "SENT",
-            sentAt: new Date(),
-          },
-        });
-      } catch (err: unknown) {
-        const message = err instanceof Error ? err.message : String(err);
-        console.error("SMTP send error:", message);
-        await prisma.email.create({
-          data: {
-            userId: user.id,
-            type: "VERIFICATION",
-            to: email,
-            subject,
-            status: "FAILED",
-            failedReason: message,
-          },
-        });
-        return NextResponse.json(
-          { error: "验证码邮件发送失败，请稍后重试或联系客服" },
-          { status: 500 }
-        );
-      }
-    } else if (resend) {
-      // Priority 2: Resend
-      const { error: sendError } = await resend.emails.send({
-        from: `${FROM_NAME} <noreply@limeup-happystudy.com>`,
-        to: email,
-        subject,
-        html: verificationHtml(code),
-      });
-      if (sendError) {
-        console.error("Resend send error:", sendError);
-        await prisma.email.create({
-          data: {
-            userId: user.id,
-            type: "VERIFICATION",
-            to: email,
-            subject,
-            status: "FAILED",
-            failedReason: sendError.message,
-          },
-        });
-        return NextResponse.json(
-          { error: "验证码邮件发送失败，请稍后重试或联系客服" },
-          { status: 500 }
-        );
-      } else {
-        await prisma.email.create({
-          data: {
-            userId: user.id,
-            type: "VERIFICATION",
-            to: email,
-            subject,
-            status: "SENT",
-            sentAt: new Date(),
-          },
-        });
-      }
-    } else {
-      // Priority 3: Dev Mode — code logged + stored in DB
-      console.log(`[DEV] Verification code for ${email}: ${code}`);
-      await prisma.email.create({
-        data: {
-          userId: user.id,
-          type: "VERIFICATION",
-          to: email,
-          subject,
-          status: "SENT",
-          sentAt: new Date(),
-          body: `[DEV MODE] Code: ${code}`,
-        },
-      });
+    try {
+      await sendMailMessage({ to: email, subject, html: verificationHtml(code) });
+    } catch (err) {
+      await prisma.email.create({ data: { userId: user.id, type: "VERIFICATION", to: email, subject, status: "FAILED", failedReason: mailErrorMessage(err) } });
+      return NextResponse.json({ error: "验证码邮件发送失败，请稍后重试或联系客服" }, { status: 500 });
     }
+    await prisma.email.create({ data: { userId: user.id, type: "VERIFICATION", to: email, subject, status: "SENT", sentAt: new Date() } });
 
     return NextResponse.json({ success: true });
   } catch (error) {

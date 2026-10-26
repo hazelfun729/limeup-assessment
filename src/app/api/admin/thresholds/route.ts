@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { cookies } from "next/headers";
+import { getAdminSession } from "@/lib/admin/auth";
 
 /**
  * GET /api/admin/thresholds
@@ -8,8 +8,7 @@ import { cookies } from "next/headers";
  */
 export async function GET() {
   try {
-    const cookieStore = await cookies();
-    if (!cookieStore.get("admin_session")?.value) {
+    if (!(await getAdminSession())?.id) {
       return NextResponse.json({ error: "未登录" }, { status: 401 });
     }
 
@@ -31,8 +30,7 @@ export async function GET() {
  */
 export async function PUT(request: NextRequest) {
   try {
-    const cookieStore = await cookies();
-    const adminId = cookieStore.get("admin_session")?.value;
+    const adminId = (await getAdminSession())?.id;
     if (!adminId) {
       return NextResponse.json({ error: "未登录" }, { status: 401 });
     }

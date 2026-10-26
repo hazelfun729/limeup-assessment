@@ -39,7 +39,7 @@ export default function HomePage() {
           隐私政策
         </Link>
         <span className="text-border">·</span>
-        <span>沪ICP备XXXXXXXX号</span>
+        {process.env.NEXT_PUBLIC_ICP_NUMBER && <span>{process.env.NEXT_PUBLIC_ICP_NUMBER}</span>}
       </footer>
     </main>
   );

@@ -21,7 +21,8 @@ export async function GET() {
         createdAt: user.createdAt,
       },
     });
-  } catch {
-    return NextResponse.json({ authenticated: false });
+  } catch (error) {
+    console.error("Failed to check user session:", error);
+    return NextResponse.json({ error: "账户状态暂不可用" }, { status: 503 });
   }
 }

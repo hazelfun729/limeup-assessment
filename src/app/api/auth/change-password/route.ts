@@ -1,3 +1,4 @@
+import { rateLimit } from "@/lib/security/rate-limit";
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireUser } from "@/lib/user/auth";
@@ -26,6 +27,9 @@ export async function POST(request: NextRequest) {
         { status: 400 }
       );
     }
+
+    const limited = await rateLimit("verify", user.email, 10, 300);
+    if (limited) return limited;
 
     // Verify identity via email code
     const fullUser = await prisma.user.findUnique({
@@ -68,6 +72,7 @@ export async function POST(request: NextRequest) {
       },
     });
 
+    await prisma.authSession.deleteMany({ where: { kind: "USER", subjectId: user.id } });
     return NextResponse.json({ success: true });
   } catch (error) {
     if (error instanceof Error && error.message === "Unauthorized") {

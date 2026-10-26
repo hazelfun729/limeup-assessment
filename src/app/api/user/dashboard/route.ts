@@ -101,6 +101,7 @@ export async function GET() {
             }
           : null,
         handbookStatus: handbook?.status || null,
+        handbookId: handbook?.id || null,
         handbookSentAt: handbook?.sentAt?.toISOString() || null,
         paymentStatus: payment?.status || null,
         paymentAmount: payment?.amount?.toString() || null,

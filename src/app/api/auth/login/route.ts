@@ -1,3 +1,5 @@
+import { rateLimit } from "@/lib/security/rate-limit";
+import { createSession } from "@/lib/security/session";
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSessionCookieName, getSessionMaxAge } from "@/lib/user/auth";
@@ -9,7 +11,9 @@ import { getSessionCookieName, getSessionMaxAge } from "@/lib/user/auth";
  */
 export async function POST(request: NextRequest) {
   try {
-    const { email, code } = await request.json();
+    const body = await request.json();
+    const email = typeof body.email === "string" ? body.email.trim().toLowerCase() : "";
+    const code = body.code;
 
     if (!email || !code) {
       return NextResponse.json(
@@ -17,6 +21,9 @@ export async function POST(request: NextRequest) {
         { status: 400 }
       );
     }
+
+    const limited = await rateLimit("verify", String(email), 10, 300);
+    if (limited) return limited;
 
     const user = await prisma.user.findUnique({
       where: { email },
@@ -59,13 +66,15 @@ export async function POST(request: NextRequest) {
     }
 
     // Clear verification code
-    await prisma.user.update({
-      where: { id: user.id },
+    const consumed = await prisma.user.updateMany({
+      where: { id: user.id, verificationCode: code, codeExpiresAt: { gt: new Date() } },
       data: {
         verificationCode: null,
         codeExpiresAt: null,
       },
     });
+
+    if (!consumed.count) return NextResponse.json({ error: "验证码已使用，请重新获取" }, { status: 400 });
 
     // Set session cookie
     const cookieName = getSessionCookieName();
@@ -76,7 +85,7 @@ export async function POST(request: NextRequest) {
       userId: user.id,
     });
 
-    response.cookies.set(cookieName, user.id, {
+    response.cookies.set(cookieName, await createSession("USER", user.id, maxAge), {
       httpOnly: true,
       secure: process.env.NODE_ENV === "production",
       sameSite: "lax",

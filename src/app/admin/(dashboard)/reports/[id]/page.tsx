@@ -14,6 +14,7 @@ import {
   PanelLeftClose,
   ChevronDown,
 } from "lucide-react";
+import { ReportAudit } from "@/components/report-audit";
 import { Button } from "@/components/ui/button";
 
 // ==========================================
@@ -36,7 +37,9 @@ type ReportDetail = {
     version: number;
     createdAt: string;
   };
-  user: { email: string; phone: string | null };
+  delivery?: { status: string; error: string | null; sentAt: string | null; to: string } | null;
+  jobIssue?: string | null;
+  user: { email: string; phone: string | null; emailVerified?: boolean };
   assessment: {
     studentName: string | null;
     parentName: string | null;
@@ -69,22 +72,15 @@ type ReportDetail = {
   payment: { status: string; amount: number; confirmedAt: string | null } | null;
 };
 
-type ParsedSection = {
-  id: string;
-  title: string;
-  content: string;
-  chapterNum: number | null;
-};
-
 // ==========================================
 // Constants
 // ==========================================
 
 const ANSWER_LABELS: Record<string, string> = {
-  ALWAYS: "总是",
-  OFTEN: "经常",
-  SOMETIMES: "偶尔",
-  RARELY: "极少",
+  ALWAYS: "非常符合",
+  OFTEN: "比较符合",
+  SOMETIMES: "比较不符合",
+  RARELY: "非常不符合",
   UNKNOWN: "不了解",
 };
 
@@ -100,88 +96,11 @@ const SYSTEM_ORDER = ["motivation", "ability", "perseverance"] as const;
 // Helpers
 // ==========================================
 
-function decodeEntities(str: string): string {
-  let result = str;
-  let prev = "";
-  while (prev !== result) {
-    prev = result;
-    result = result
-      .replace(/&amp;/g, "&")
-      .replace(/&lt;/g, "<")
-      .replace(/&gt;/g, ">")
-      .replace(/&quot;/g, '"')
-      .replace(/&#39;/g, "'");
-  }
-  return result;
-}
-
-function sanitizeHtml(raw: string): string {
-  let html = raw.trim();
-  // Case 1: marked converted ```html...``` into <pre><code class="language-html">...escaped...</code></pre>
-  const preMatch = html.match(/<pre><code[^>]*>([\s\S]*?)<\/code><\/pre>/i);
-  if (preMatch) {
-    html = decodeEntities(preMatch[1]);
-  }
-  // Case 2: Raw code fences in the HTML string
-  const fenceMatch = html.match(/^```(?:html|HTML)?\s*\n([\s\S]*?)\n```\s*$/);
-  if (fenceMatch) {
-    html = fenceMatch[1].trim();
-  }
-  return html;
-}
-
-function parseReportSections(html: string): ParsedSection[] {
-  const sections: ParsedSection[] = [];
-  const headingRegex = /<(h[1-3])[^>]*>(.*?)<\/\1>/gi;
-  let lastIndex = 0;
-  let lastTitle = "";
-  let match;
-
-  while ((match = headingRegex.exec(html)) !== null) {
-    if (lastTitle) {
-      sections.push({
-        id: sections.length.toString(),
-        title: lastTitle,
-        content: html.slice(lastIndex, match.index),
-        chapterNum: getChapterNumber(lastTitle),
-      });
-    }
-    lastTitle = match[2].replace(/<[^>]+>/g, "").replace(/\*+/g, "").trim();
-    lastIndex = match.index + match[0].length;
-  }
-  if (lastTitle && lastIndex < html.length) {
-    sections.push({
-      id: sections.length.toString(),
-      title: lastTitle,
-      content: html.slice(lastIndex),
-      chapterNum: getChapterNumber(lastTitle),
-    });
-  }
-  return sections;
-}
-
-function getChapterNumber(title: string): number | null {
-  const cnNums: Record<string, number> = {
-    "一": 1, "二": 2, "三": 3, "四": 4, "五": 5,
-    "六": 6, "七": 7, "八": 8, "九": 9, "十": 10,
-  };
-  const cnMatch = title.match(/第([一二三四五六七八九十])章/);
-  if (cnMatch && cnMatch[1]) return cnNums[cnMatch[1]] ?? null;
-  const numMatch = title.match(/第\s*(\d+)\s*章/);
-  if (numMatch) return parseInt(numMatch[1], 10);
-  return null;
-}
 
 function getBarColor(level: string): string {
   if (level === "强") return "#86b930";
   if (level === "中") return "#f59e0b";
   return "#ef4444";
-}
-
-function getLevelBg(level: string): string {
-  if (level === "强") return "bg-green-50 text-green-700 border-green-200";
-  if (level === "中") return "bg-amber-50 text-amber-700 border-amber-200";
-  return "bg-red-50 text-red-600 border-red-200";
 }
 
 function getSystemTagStyle(level: string): React.CSSProperties {
@@ -193,14 +112,6 @@ function getSystemTagStyle(level: string): React.CSSProperties {
 // ==========================================
 // Sub-Components
 // ==========================================
-
-function LevelBadge({ level }: { level: string }) {
-  return (
-    <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-semibold ${getLevelBg(level)}`}>
-      {level}
-    </span>
-  );
-}
 
 function ProgressBar({ score, level, height = 8 }: { score: number; level: string; height?: number }) {
   const pct = Math.max(0, Math.min(100, score));
@@ -301,7 +212,9 @@ export default function ReportReviewPage() {
   const [activeTab, setActiveTab] = useState<"report" | "answers">("report");
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [expandedDims, setExpandedDims] = useState(false);
-  const [confirmingPayment, setConfirmingPayment] = useState(false);
+  const [sendMessage, setSendMessage] = useState("");
+  const [checkingMail, setCheckingMail] = useState(false);
+  const [mailHealth, setMailHealth] = useState<{ ok: boolean; message: string } | null>(null);
 
   const fetchReport = useCallback(async () => {
     try {
@@ -314,19 +227,54 @@ export default function ReportReviewPage() {
     setLoading(false);
   }, [reportId]);
 
-  useEffect(() => { fetchReport(); }, [fetchReport]);
+  useEffect(() => {
+    const timer = setTimeout(() => { fetchReport(); }, 0);
+    return () => clearTimeout(timer);
+  }, [fetchReport]);
 
   const handleStatusChange = async (status: string) => {
     setSaving(true);
     try {
-      await fetch(`/api/admin/reports/${reportId}`, {
+      const res = await fetch(`/api/admin/reports/${reportId}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ status }),
       });
+      if (!res.ok) {
+        const result = await res.json();
+        alert(result.error || "更新失败");
+      }
       await fetchReport();
-    } catch { /* ignore */ }
+    } catch { alert("请求失败，请稍后重试"); }
     setSaving(false);
+  };
+
+  const handleSend = async () => {
+    if (!data?.handbook) return;
+    setSaving(true);
+    setSendMessage("正在向邮件服务提交报告，请稍候…");
+    try {
+      const res = await fetch(`/api/admin/reports/${data.handbook.id}/send`, { method: "POST" });
+      const result = await res.json();
+      setSendMessage(res.ok ? `邮件服务已接受报告，收件地址：${result.delivery.to}` : result.error || "发送失败，请核查邮件记录");
+      await fetchReport();
+    } catch {
+      setSendMessage("请求中断，请先刷新核对投递状态，避免重复发送");
+    }
+    setSaving(false);
+  };
+
+  const handleCheckMail = async () => {
+    setCheckingMail(true);
+    setMailHealth(null);
+    try {
+      const res = await fetch("/api/admin/mail-health", { cache: "no-store" });
+      const result = await res.json();
+      setMailHealth(res.ok ? result : { ok: false, message: result.error || "邮件服务检测失败" });
+    } catch {
+      setMailHealth({ ok: false, message: "无法连接本站的邮件检测接口" });
+    }
+    setCheckingMail(false);
   };
 
   const handleGenerate = async () => {
@@ -334,6 +282,11 @@ export default function ReportReviewPage() {
     try {
       const res = await fetch(`/api/admin/reports/${reportId}/generate`, { method: "POST" });
       if (res.ok) {
+        const result = await res.json();
+        if (result.warning) alert(result.warning);
+        else if (result.outcome === "ALREADY_QUEUED") alert("报告已在生成队列中，请稍后刷新查看。");
+        else if (result.outcome === "SKIPPED") alert("报告已有内容，本次没有重新调用 AI。");
+        else if (result.queued) alert("报告已进入生成队列，请稍后刷新查看。");
         await fetchReport();
       } else {
         const err = await res.json();
@@ -343,30 +296,6 @@ export default function ReportReviewPage() {
       alert("生成请求失败");
     }
     setGenerating(false);
-  };
-
-  const handleConfirmPayment = async () => {
-    if (!data?.paymentId) return;
-    setConfirmingPayment(true);
-    try {
-      const res = await fetch(`/api/admin/payments/${data.paymentId}/confirm`, {
-        method: "POST",
-      });
-      if (res.ok) {
-        const result = await res.json();
-        // 后台异步触发报告生成
-        if (result.handbookId) {
-          fetch(`/api/admin/reports/${result.handbookId}/generate`, { method: "POST" }).catch(() => {});
-        }
-        await fetchReport();
-      } else {
-        const err = await res.json();
-        alert(err.error || "确认支付失败");
-      }
-    } catch {
-      alert("确认支付请求失败");
-    }
-    setConfirmingPayment(false);
   };
 
   if (loading) {
@@ -403,21 +332,16 @@ export default function ReportReviewPage() {
               <p className="text-xs text-gray-500">{user.email} · {assessment.studentName || "—"}</p>
             </div>
           </div>
-          <Button
-            size="sm"
-            onClick={handleConfirmPayment}
-            disabled={confirmingPayment}
-            className="gap-1 rounded-lg bg-[#6a9b1e] text-white hover:bg-[#5a8518]"
-          >
-            {confirmingPayment ? "确认中..." : "确认支付并生成报告"}
-          </Button>
+          <Link href="/admin/payments" className="rounded-lg bg-[#6a9b1e] px-3 py-2 text-sm text-white hover:bg-[#5a8518]">
+            去核对微信收款
+          </Link>
         </header>
         <main className="flex-1 overflow-y-auto p-6">
           <div className="mx-auto max-w-[820px]">
             <div className="mb-6 rounded-2xl border-2 border-amber-300 bg-amber-50 p-6 text-center">
               <p className="text-lg font-semibold text-amber-800">等待支付确认</p>
               <p className="mt-1 text-sm text-amber-600">
-                用户已完成测评并提交了支付凭证，确认支付后将自动触发 AI 报告生成。
+                用户已提交付款信息。请先在微信收款账单中核对，再到支付确认页确认订单。
               </p>
             </div>
             <h3 className="mb-3 text-sm font-semibold text-gray-500">原始答卷 ({answers.length} 题)</h3>
@@ -456,9 +380,9 @@ export default function ReportReviewPage() {
   }
 
   const { handbook, user, assessment, answers, payment } = data;
+  const placeholderEmail = /\.(?:local|localhost|invalid|test|example)$/i.test(user.email.split("@")[1] || "");
   const profile = data.profile;
-  const html = sanitizeHtml(handbook.contentHtml || "");
-  const sections = html ? parseReportSections(html) : [];
+  const html = (handbook.contentHtml || "");
 
   const sysScores = profile?.systemScores ?? null;
   const sysEntries = sysScores
@@ -492,7 +416,7 @@ export default function ReportReviewPage() {
         </div>
         <div className="flex items-center gap-2">
           <Link
-            href={`/report/${reportId}`}
+            href={`/api/admin/reports/${handbook.id}/document`}
             target="_blank"
             className="inline-flex items-center gap-1 rounded-lg border border-gray-200 px-3 py-1.5 text-sm text-gray-600 transition-colors hover:bg-gray-50 hover:text-gray-900"
           >
@@ -500,6 +424,14 @@ export default function ReportReviewPage() {
             用户端预览
           </Link>
 
+          {handbook.contentHtml && <a className="rounded-lg border px-3 py-1.5 text-sm" href={`/api/admin/reports/${handbook.id}/document?download=1`}>下载正式 HTML</a>}
+          {handbook.contentHtml && <a className="rounded-lg border px-3 py-1.5 text-sm" href={`/api/admin/reports/${handbook.id}/email-preview`} target="_blank" rel="noopener noreferrer" title="用浏览器近似查看邮件正文；不同邮箱仍可能略有差异">邮件版预览</a>}
+          <a className="rounded-lg border px-3 py-1.5 text-sm" href={`/api/admin/reports/${handbook.id}/audit?download=1`}>下载生成记录</a>
+          {(handbook.status === "REVIEWING" || handbook.status === "SENDING") && (
+            <Button variant="outline" size="sm" onClick={handleCheckMail} disabled={checkingMail}>
+              {checkingMail ? "检测中…" : "检测邮件服务"}
+            </Button>
+          )}
           {handbook.status === "ANALYZING" && (
             <Button
               size="sm"
@@ -529,12 +461,12 @@ export default function ReportReviewPage() {
               </Button>
               <Button
                 size="sm"
-                onClick={() => handleStatusChange("SENDING")}
-                disabled={saving || generating}
+                onClick={handleSend}
+                disabled={saving || generating || placeholderEmail || data.user.emailVerified === false}
                 className="gap-1 rounded-lg bg-[#6a9b1e] text-white hover:bg-[#5a8518]"
               >
                 <CheckCircle className="h-4 w-4" />
-                审核通过，准备发送
+                审核通过并发送邮件
               </Button>
             </>
           )}
@@ -542,21 +474,25 @@ export default function ReportReviewPage() {
           {handbook.status === "SENDING" && (
             <Button
               size="sm"
-              onClick={() => handleStatusChange("SENT")}
-              disabled={saving || generating}
+              onClick={handleSend}
+              disabled={saving || generating || placeholderEmail || data.user.emailVerified === false || data.delivery?.status === "UNKNOWN" || data.delivery?.status === "SENDING"}
               className="gap-1 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700"
             >
-              ✓ 标记已发送
+              {data.delivery?.status === "FAILED" ? "重试发送邮件" : "发送报告邮件"}
             </Button>
           )}
 
-          {handbook.status === "SENT" && (
+          {handbook.status === "SENT" && data.delivery?.status === "SENT" && (
             <span className="rounded-full bg-emerald-100 px-3 py-1 text-xs font-medium text-emerald-700">
               ✓ 已发送
             </span>
           )}
 
-          {handbook.status !== "ANALYZING" && (
+          {handbook.status === "SENT" && data.delivery?.status !== "SENT" && (
+            <span className="text-xs font-medium text-amber-700">旧记录缺少可核实的投递凭证</span>
+          )}
+
+          {handbook.status !== "ANALYZING" && handbook.status !== "SENDING" && (
             <Button
               variant="outline"
               size="sm"
@@ -571,6 +507,35 @@ export default function ReportReviewPage() {
           )}
         </div>
       </header>
+      {data.jobIssue && <p role="alert" className="border-b border-amber-200 bg-amber-50 px-5 py-3 text-sm text-amber-900">{data.jobIssue}</p>}
+
+      {placeholderEmail && (
+        <p className="border-b border-amber-200 bg-amber-50 px-5 py-2 text-sm text-amber-900">
+          这份历史记录使用占位邮箱，无法真实发信。请用已验证邮箱的用户报告进行收件测试。
+        </p>
+      )}
+
+      {sendMessage && (
+        <p role="status" className="border-b border-lime-200 bg-lime-50 px-5 py-2 text-sm text-lime-900">{sendMessage}</p>
+      )}
+
+      {mailHealth && (
+        <p role="status" className={`border-b px-5 py-2 text-sm ${mailHealth.ok ? "border-lime-200 bg-lime-50 text-lime-900" : "border-red-200 bg-red-50 text-red-900"}`}>
+          邮件服务检测：{mailHealth.message}
+        </p>
+      )}
+
+      {data.user.emailVerified === false && (
+        <p className="border-b border-amber-200 bg-amber-50 px-5 py-2 text-sm text-amber-900">用户邮箱尚未验证，不能发送报告。</p>
+      )}
+
+      {handbook.status === "SENDING" && !placeholderEmail && (
+        <p className="border-b border-amber-200 bg-amber-50 px-5 py-2 text-sm text-amber-900">
+          {data.delivery?.status === "FAILED" ? `邮件未送达：${data.delivery.error || "请检查邮件配置"}。可以重试。`
+            : data.delivery?.status === "SENDING" || data.delivery?.status === "UNKNOWN" ? "邮件结果尚未确认，请先核对邮箱或服务商记录，暂勿重复发送。"
+            : "审核已通过，但尚未产生报告邮件记录。请核对收件地址后点击“发送报告邮件”。"}
+        </p>
+      )}
 
       {/* ── Main Content Area ── */}
       <div className="flex flex-1 overflow-hidden">
@@ -717,131 +682,17 @@ export default function ReportReviewPage() {
             </button>
           </div>
 
+          <ReportAudit id={handbook.id} refresh={generating} />
           <div className="p-6">
             {activeTab === "report" ? (
               <div className="mx-auto max-w-[820px]">
                 {html ? (
-                  <div className="space-y-6">
-                    {/* Profile header card */}
-                    {profile && (
-                      <div className="rounded-2xl border border-gray-100 bg-white p-6 shadow-sm">
-                        <div className="flex items-center gap-2 mb-3">
-                          <span className="text-lg">{profile.learningModeEmoji || "📊"}</span>
-                          <span className="text-lg font-bold text-[#4a7c00]">{profile.learningModeName || profile.learningMode}</span>
-                          <span className="rounded-full bg-[#d2e659]/20 border border-[#d2e659]/40 px-2.5 py-0.5 text-xs font-semibold text-[#3d5c00]">学习类型</span>
-                          {sysEntries.map((sys) => (
-                            <span key={sys.key} className="rounded-full px-2 py-0.5 text-xs font-medium" style={getSystemTagStyle(sys.level)}>
-                              {sys.name}：{sys.level}
-                            </span>
-                          ))}
-                        </div>
-                        {profile.summary && <p className="text-[15px] text-gray-600 leading-[1.9]">{profile.summary}</p>}
-                      </div>
-                    )}
-
-                    {/* Three score cards */}
-                    {sysScores && (
-                      <div className="flex gap-4 flex-wrap sm:flex-nowrap">
-                        {sysEntries.map((sys) => (
-                          <div key={sys.key} className="flex-1 rounded-2xl border border-gray-100 bg-white p-5 shadow-sm min-w-[140px]">
-                            <p className="text-sm text-gray-500 mb-2">{sys.name}</p>
-                            <span className="text-3xl font-bold tabular-nums" style={{ color: sys.level === "强" ? "#4a7c00" : sys.level === "中" ? "#b45309" : "#dc2626" }}>
-                              {sys.score}
-                            </span>
-                            <div className="mt-2"><LevelBadge level={sys.level} /></div>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-
-                    {/* Nine dimensions */}
-                    {profile?.dimensionScores && (
-                      <div className="rounded-2xl border border-gray-100 bg-white p-6 shadow-sm">
-                        <h4 className="text-base font-bold text-gray-900 mb-5">九大维度测评分析</h4>
-                        <div className="flex gap-8 flex-wrap">
-                          {SYSTEM_ORDER.map((sysKey) => {
-                            const info = SYSTEM_INFO[sysKey];
-                            if (!info || !profile.dimensionScores) return null;
-                            return (
-                              <div key={sysKey} className="flex-1 min-w-[200px]">
-                                <h5 className="text-sm font-bold text-gray-800 mb-3 flex items-center gap-1.5">
-                                  <span>{info.icon}</span>{info.name}系统
-                                </h5>
-                                <div className="space-y-3">
-                                  {info.dimensions.map((dimCode) => {
-                                    const dim = profile.dimensionScores?.[dimCode];
-                                    if (!dim) return null;
-                                    return (
-                                      <div key={dimCode} className="flex items-center gap-3">
-                                        <span className="w-[72px] shrink-0 text-sm text-gray-700 font-medium">{dim.name}</span>
-                                        <div className="flex-1"><ProgressBar score={dim.score} level={dim.level} height={10} /></div>
-                                        <span className="w-8 text-right text-sm font-semibold tabular-nums text-gray-800">{dim.score}</span>
-                                        <LevelBadge level={dim.level} />
-                                      </div>
-                                    );
-                                  })}
-                                </div>
-                              </div>
-                            );
-                          })}
-                        </div>
-                      </div>
-                    )}
-
-                    <hr className="border-gray-100" />
-
-                    {/* Chapter sections with AI content */}
-                    {sections.map((section) => (
-                      <section key={section.id} className="mt-10">
-                        <div className="flex items-center gap-3 mb-5">
-                          {section.chapterNum !== null && (
-                            <div className="w-9 h-9 rounded-full bg-[#6a9b1e] flex items-center justify-center text-white text-sm font-bold shrink-0 shadow-sm">
-                              {section.chapterNum}
-                            </div>
-                          )}
-                          <h2 className="text-xl font-bold text-gray-900 tracking-tight">{section.title}</h2>
-                        </div>
-                        {section.content.trim() && (
-                          <div className="max-w-[760px]">
-                            <div className="report-prose text-gray-800 text-[15px]" dangerouslySetInnerHTML={{ __html: section.content }} />
-                          </div>
-                        )}
-                      </section>
-                    ))}
-
-                    {/* Fallback: raw HTML if no sections parsed */}
-                    {sections.length === 0 && (
-                      <div className="report-prose text-gray-800 text-[15px]" dangerouslySetInnerHTML={{ __html: html }} />
-                    )}
-
-                    {/* Strengths & Weaknesses */}
-                    {profile?.strengths && profile.strengths.length > 0 && (
-                      <div className="rounded-xl border border-gray-100 border-l-4 border-l-[#6a9b1e] bg-white p-5 shadow-sm">
-                        <h4 className="text-sm font-bold text-[#4a7c00] mb-2 flex items-center gap-1.5">🏆 核心优势</h4>
-                        <div className="space-y-2">
-                          {profile.strengths.map((s, i) => (
-                            <div key={i} className="flex items-center justify-between">
-                              <span className="font-medium text-gray-900">{profile.moduleScores?.[s.code]?.name || s.code}</span>
-                              <span className="text-sm text-[#4a7c00] font-semibold">{s.score}分</span>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-                    {profile?.weaknesses && profile.weaknesses.length > 0 && (
-                      <div className="rounded-xl border border-gray-100 border-l-4 border-l-amber-500 bg-white p-5 shadow-sm">
-                        <h4 className="text-sm font-bold text-amber-700 mb-2 flex items-center gap-1.5">📌 需要关注的成长空间</h4>
-                        <div className="space-y-2">
-                          {profile.weaknesses.map((s, i) => (
-                            <div key={i} className="flex items-center justify-between">
-                              <span className="font-medium text-gray-900">{profile.moduleScores?.[s.code]?.name || s.code}</span>
-                              <span className="text-sm text-amber-700 font-semibold">{s.score}分</span>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-                  </div>
+                  <iframe
+                    key={`${handbook.id}-v${handbook.version}`}
+                    title="正式成长导航报告"
+                    src={`/api/admin/reports/${handbook.id}/document?v=${handbook.version}`}
+                    className="h-[85vh] w-full rounded-xl border"
+                  />
                 ) : (
                   <div className="rounded-2xl border border-gray-200 bg-white p-16 text-center">
                     <div className="text-4xl mb-4">📝</div>

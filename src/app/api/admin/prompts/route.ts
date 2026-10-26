@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { cookies } from "next/headers";
+import { getAdminSession } from "@/lib/admin/auth";
 
 /**
  * GET /api/admin/prompts
@@ -8,8 +8,7 @@ import { cookies } from "next/headers";
  */
 export async function GET() {
   try {
-    const cookieStore = await cookies();
-    if (!cookieStore.get("admin_session")?.value) {
+    if (!(await getAdminSession())?.id) {
       return NextResponse.json({ error: "未登录" }, { status: 401 });
     }
 
@@ -54,8 +53,7 @@ export async function GET() {
  */
 export async function POST(request: NextRequest) {
   try {
-    const cookieStore = await cookies();
-    const adminId = cookieStore.get("admin_session")?.value;
+    const adminId = (await getAdminSession())?.id;
     if (!adminId) {
       return NextResponse.json({ error: "未登录" }, { status: 401 });
     }
@@ -87,12 +85,6 @@ export async function POST(request: NextRequest) {
         description: description || null,
         createdBy: adminId,
       },
-    });
-
-    // Deactivate all other versions of this prompt
-    await prisma.prompt.updateMany({
-      where: { name, id: { not: prompt.id } },
-      data: { isActive: false },
     });
 
     // Log

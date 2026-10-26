@@ -1,3 +1,4 @@
+import { revokeSession } from "@/lib/security/session";
 import { NextResponse } from "next/server";
 import { getSessionCookieName } from "@/lib/user/auth";
 
@@ -7,6 +8,7 @@ import { getSessionCookieName } from "@/lib/user/auth";
  */
 export async function POST() {
   const cookieName = getSessionCookieName();
+  await revokeSession(cookieName);
   const response = NextResponse.json({ success: true });
   response.cookies.set(cookieName, "", {
     httpOnly: true,

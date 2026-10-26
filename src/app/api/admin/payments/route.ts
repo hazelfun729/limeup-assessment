@@ -1,11 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { cookies } from "next/headers";
+import { getAdminSession } from "@/lib/admin/auth";
 
 export async function GET(request: NextRequest) {
   try {
-    const cookieStore = await cookies();
-    if (!cookieStore.get("admin_session")?.value) {
+    if (!(await getAdminSession())?.id) {
       return NextResponse.json({ error: "未登录" }, { status: 401 });
     }
 
@@ -27,7 +26,7 @@ export async function GET(request: NextRequest) {
         orderBy: { createdAt: "desc" },
         include: {
           user: { select: { email: true, phone: true } },
-          assessment: { select: { id: true } },
+          assessment: { select: { id: true, studentName: true, handbook: { select: { id: true } } } },
         },
       }),
       prisma.payment.count({ where }),
@@ -42,11 +41,14 @@ export async function GET(request: NextRequest) {
         status: p.status,
         method: p.method,
         orderNo: p.orderNo,
+        wechatTransactionId: p.wechatTransactionId,
         screenshot: p.screenshot,
         remark: p.remark,
         confirmedBy: p.confirmedBy,
         confirmedAt: p.confirmedAt,
         assessmentId: p.assessment.id,
+        studentName: p.assessment.studentName,
+        reportId: p.assessment.handbook?.id ?? null,
         createdAt: p.createdAt,
       })),
       total,

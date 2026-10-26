@@ -220,6 +220,7 @@ export function calculateScores(answers: AnswerRecord[]): ScoringResult {
   }
 
   for (const a of answers) {
+    if (a.answer === "UNKNOWN") continue;
     const moduleCode = QUESTION_MODULE_MAP[a.questionOrder];
     if (moduleCode) {
       moduleAnswers.get(moduleCode)!.push(a.score);
@@ -233,8 +234,6 @@ export function calculateScores(answers: AnswerRecord[]): ScoringResult {
       moduleScores[code] = Math.round(
         scores.reduce((sum, s) => sum + s, 0) / scores.length
       );
-    } else {
-      moduleScores[code] = 0;
     }
   }
 
@@ -248,8 +247,6 @@ export function calculateScores(answers: AnswerRecord[]): ScoringResult {
       dimensionScores[dim.code] = Math.round(
         modScores.reduce((sum, s) => sum + s, 0) / modScores.length
       );
-    } else {
-      dimensionScores[dim.code] = 0;
     }
   }
 
@@ -259,9 +256,8 @@ export function calculateScores(answers: AnswerRecord[]): ScoringResult {
     const dimScores = sys.dimensions
       .map((d) => dimensionScores[d])
       .filter((s) => s !== undefined);
-    const score = dimScores.length > 0
-      ? Math.round(dimScores.reduce((sum, s) => sum + s, 0) / dimScores.length)
-      : 0;
+    if (!dimScores.length) throw new Error(`${sys.name}缺少有效回答，请补充该阶段的观察后再生成画像`);
+    const score = Math.round(dimScores.reduce((sum, s) => sum + s, 0) / dimScores.length);
     systemScores[sys.code] = { score, level: getScoreLevel(score) };
   }
 

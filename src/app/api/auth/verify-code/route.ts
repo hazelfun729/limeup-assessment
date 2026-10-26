@@ -1,3 +1,4 @@
+import { rateLimit } from "@/lib/security/rate-limit";
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 
@@ -17,6 +18,9 @@ export async function POST(request: NextRequest) {
         { status: 400 }
       );
     }
+
+    const limited = await rateLimit("verify", String(email), 10, 300);
+    if (limited) return limited;
 
     const user = await prisma.user.findUnique({ where: { email } });
 

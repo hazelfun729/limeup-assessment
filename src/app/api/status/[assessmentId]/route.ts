@@ -1,5 +1,7 @@
+import { assessmentAccess } from "@/lib/security/assessment";
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { getReportJob, isStaleReportJob } from "@/lib/report/job";
 
 /**
  * GET /api/status/[assessmentId]
@@ -18,25 +20,35 @@ export async function GET(
 ) {
   try {
     const { assessmentId } = await params;
+    const denied = await assessmentAccess(assessmentId);
+    if (denied) return denied;
 
     const payment = await prisma.payment.findUnique({
       where: { assessmentId },
-      select: { status: true, confirmedAt: true },
+      select: { status: true, confirmedAt: true, orderNo: true },
     });
 
     const handbook = await prisma.growthHandbook.findUnique({
       where: { assessmentId },
-      select: { status: true, sentAt: true, sentTo: true },
+      select: { id: true, status: true, sentAt: true, sentTo: true },
     });
+    const reportJob = handbook?.status === "ANALYZING" ? await getReportJob(assessmentId) : null;
+    const generationIssue = reportJob?.state === "FAILED"
+      ? "报告生成未完成，工作人员正在处理"
+      : reportJob && isStaleReportJob(reportJob)
+        ? "报告生成任务已超时，工作人员需要重新启动"
+        : null;
 
     // Determine current status
     let currentStatus: string;
-    if (!payment || payment.status === "PENDING") {
+    if (payment?.status === "FAILED" || payment?.status === "REFUNDED") {
+      currentStatus = payment.status;
+    } else if (!payment || payment.status === "PENDING") {
       currentStatus = "PENDING";
     } else if (!handbook) {
       currentStatus = "ANALYZING";
     } else if (handbook.status === "ANALYZING") {
-      currentStatus = "ANALYZING";
+      currentStatus = generationIssue ? "FAILED" : "ANALYZING";
     } else if (handbook.status === "REVIEWING" || handbook.status === "NEEDS_MANUAL_REVIEW") {
       currentStatus = "REVIEWING";
     } else if (handbook.status === "SENDING") {
@@ -51,11 +63,12 @@ export async function GET(
 
     return NextResponse.json({
       currentStatus,
+      generationIssue,
       payment: payment
-        ? { status: payment.status, confirmedAt: payment.confirmedAt }
+        ? { status: payment.status, confirmedAt: payment.confirmedAt, orderNo: payment.orderNo }
         : null,
       handbook: handbook
-        ? { status: handbook.status, sentAt: handbook.sentAt, sentTo: handbook.sentTo }
+        ? { id: handbook.id, status: handbook.status, sentAt: handbook.sentAt, sentTo: handbook.sentTo }
         : null,
     });
   } catch (error) {

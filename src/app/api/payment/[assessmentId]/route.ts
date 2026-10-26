@@ -1,3 +1,5 @@
+import { REPORT_PRICE } from "@/lib/profile/content";
+import { assessmentAccess } from "@/lib/security/assessment";
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 
@@ -11,6 +13,8 @@ export async function GET(
 ) {
   try {
     const { assessmentId } = await params;
+    const denied = await assessmentAccess(assessmentId);
+    if (denied) return denied;
 
     const payment = await prisma.payment.findUnique({
       where: { assessmentId },
@@ -47,9 +51,13 @@ export async function POST(
 ) {
   try {
     const { assessmentId } = await params;
+    const denied = await assessmentAccess(assessmentId);
+    if (denied) return denied;
     const body = await request.json().catch(() => ({}));
-    const { screenshot } = body as { screenshot?: string };
-
+    const suffix = (body as { wechatOrderSuffix?: unknown }).wechatOrderSuffix;
+    if (typeof suffix !== "string" || !/^\d{6}$/.test(suffix)) {
+      return NextResponse.json({ error: "请填写微信支付订单号最后 6 位数字" }, { status: 400 });
+    }
     // Verify assessment exists and is completed
     const assessment = await prisma.assessment.findUnique({
       where: { id: assessmentId },
@@ -62,6 +70,7 @@ export async function POST(
       );
     }
 
+    if (assessment.status !== "COMPLETED") return NextResponse.json({ error: "请先完成测评" }, { status: 400 });
     if (!assessment.userId) {
       return NextResponse.json(
         { error: "用户未注册" },
@@ -75,17 +84,21 @@ export async function POST(
       create: {
         userId: assessment.userId,
         assessmentId,
-        amount: "9.9" as unknown as number,
-        originalAmount: "99" as unknown as number,
+        amount: REPORT_PRICE.current,
+        originalAmount: REPORT_PRICE.original,
         method: "WECHAT_PAY",
         status: "PENDING",
-        screenshot: screenshot || null,
+        remark: suffix,
         orderNo: `LV3-${Date.now()}-${Math.random().toString(36).slice(2, 8).toUpperCase()}`,
       },
-      update: {
-        screenshot: screenshot || undefined,
-      },
+      update: {},
     });
+    if (payment.status === "PENDING") {
+      await prisma.payment.updateMany({
+        where: { id: payment.id, status: "PENDING" },
+        data: { remark: suffix },
+      });
+    }
 
     return NextResponse.json({
       id: payment.id,

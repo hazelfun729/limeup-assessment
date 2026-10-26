@@ -43,7 +43,8 @@ export default function ThresholdsPage() {
   }, []);
 
   useEffect(() => {
-    fetchThresholds();
+    const timer = setTimeout(() => { fetchThresholds(); }, 0);
+    return () => clearTimeout(timer);
   }, [fetchThresholds]);
 
   const handleSave = async () => {

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { cookies } from "next/headers";
+import { getAdminSession } from "@/lib/admin/auth";
 
 /**
  * POST /api/admin/prompts/[id]/publish
@@ -11,8 +11,7 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const cookieStore = await cookies();
-    const adminId = cookieStore.get("admin_session")?.value;
+    const adminId = (await getAdminSession())?.id;
     if (!adminId) {
       return NextResponse.json({ error: "未登录" }, { status: 401 });
     }
@@ -24,16 +23,10 @@ export async function POST(
       return NextResponse.json({ error: "Prompt 不存在" }, { status: 404 });
     }
 
-    // Deactivate all versions of this prompt
-    await prisma.prompt.updateMany({
-      where: { name: prompt.name },
-      data: { isActive: false },
-    });
-
-    // Activate this version
-    await prisma.prompt.update({
-      where: { id },
-      data: { isActive: true },
+    await prisma.$transaction(async tx => {
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${prompt.name}))`;
+      await tx.prompt.updateMany({where:{name:prompt.name},data:{isActive:false}});
+      await tx.prompt.update({where:{id},data:{isActive:true}});
     });
 
     // Log

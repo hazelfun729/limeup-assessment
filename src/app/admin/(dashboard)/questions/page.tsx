@@ -63,7 +63,10 @@ function QuestionsTab() {
     setLoading(false);
   }, []);
 
-  useEffect(() => { fetchQuestions(); }, [fetchQuestions]);
+  useEffect(() => {
+    const timer = setTimeout(() => { fetchQuestions(); }, 0);
+    return () => clearTimeout(timer);
+  }, [fetchQuestions]);
 
   const handleToggleActive = async (q: Question) => {
     try {
@@ -203,7 +206,10 @@ function ThresholdsTab() {
     setLoading(false);
   }, []);
 
-  useEffect(() => { fetchThresholds(); }, [fetchThresholds]);
+  useEffect(() => {
+    const timer = setTimeout(() => { fetchThresholds(); }, 0);
+    return () => clearTimeout(timer);
+  }, [fetchThresholds]);
 
   const handleSave = async () => {
     setSaving(true);

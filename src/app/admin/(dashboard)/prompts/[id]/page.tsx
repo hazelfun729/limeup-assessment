@@ -46,7 +46,8 @@ export default function PromptDetailPage() {
   }, [promptId, isNew]);
 
   useEffect(() => {
-    fetchPrompt();
+    const timer = setTimeout(() => { fetchPrompt(); }, 0);
+    return () => clearTimeout(timer);
   }, [fetchPrompt]);
 
   const handleSave = async () => {
